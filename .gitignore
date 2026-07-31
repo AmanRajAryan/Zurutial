@@ -1,0 +1,43 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# AndroidIDE specific
+.acside/
+
+# Android Studio Navigation editor temp files
+.navigation/
+
+# Android Studio captures folder
+captures/
+
+# Android Studio C++ includes
+.cxx/
+
+# Gradle
+.gradle/
+build/
+*/build/
+
+# Mac
+.DS_Store
+
+# Keystore files
+*.jks
+*.keystore
+
+# Google Services (if you want to ignore it)
+# google-services.json
+.kotlin/
