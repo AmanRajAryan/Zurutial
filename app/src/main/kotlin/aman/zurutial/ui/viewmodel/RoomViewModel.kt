@@ -206,8 +206,16 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             getApplication<android.app.Application>(),
             httpDataSourceFactory
         )
+        
+        val cacheInstance = aman.zurutial.media.VideoCache.getInstance(getApplication<android.app.Application>())
+        log("Disk Cache Active: ${cacheInstance.cacheSpace / 1024 / 1024} MB currently stored.")
+        
+        val cacheDataSourceFactory = androidx.media3.datasource.cache.CacheDataSource.Factory()
+            .setCache(cacheInstance)
+            .setUpstreamDataSourceFactory(dataSourceFactory)
+            .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(cacheDataSourceFactory)
 
         val exoPlayer = ExoPlayer.Builder(getApplication<android.app.Application>())
             .setMediaSourceFactory(mediaSourceFactory)
