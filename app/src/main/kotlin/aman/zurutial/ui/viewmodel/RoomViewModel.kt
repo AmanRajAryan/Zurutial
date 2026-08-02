@@ -80,6 +80,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     private var syncJob: kotlinx.coroutines.Job? = null
     private var pingJob: kotlinx.coroutines.Job? = null
     private var roomJob: kotlinx.coroutines.Job? = null
+    private var cacheLogJob: kotlinx.coroutines.Job? = null
 
     var player: ExoPlayer? = null
         private set
@@ -412,8 +413,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
-        viewModelScope.launch {
-            while (currentRoomCode == roomCode) {
+        cacheLogJob = viewModelScope.launch {
+            while (true) {
                 val currentMb = cacheInstance.cacheSpace / 1024 / 1024
                 log("Disk Cache Update: $currentMb MB currently stored.")
                 kotlinx.coroutines.delay(10_000)
@@ -489,6 +490,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         heartbeatJob?.cancel()
         syncJob?.cancel()
         pingJob?.cancel()
+        cacheLogJob?.cancel()
         player?.release()
         player = null
         roomListener = null
