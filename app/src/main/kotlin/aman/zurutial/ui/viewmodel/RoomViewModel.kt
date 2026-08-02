@@ -213,6 +213,12 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             .setMediaSourceFactory(mediaSourceFactory)
             .build().apply {
             setMediaItem(MediaItem.fromUri(file.uri))
+            
+            trackSelectionParameters = trackSelectionParameters
+                .buildUpon()
+                .setPreferredAudioLanguage("en")
+                .build()
+                
             prepare()
         }
         player = exoPlayer

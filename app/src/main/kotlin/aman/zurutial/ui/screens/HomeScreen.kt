@@ -167,15 +167,22 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(32.dp))
                         Text("Recent Rooms", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
-                        recentRooms.forEach { roomCode ->
-                            androidx.compose.material3.OutlinedButton(
-                                onClick = { 
-                                    mode = HomeMode.JOIN
-                                    viewModel.verifyRoomForJoin(roomCode) 
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                            ) {
-                                Text("Rejoin $roomCode")
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            recentRooms.forEach { roomCode ->
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = { 
+                                        mode = HomeMode.JOIN
+                                        viewModel.verifyRoomForJoin(roomCode) 
+                                    },
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                ) {
+                                    Text("Rejoin $roomCode")
+                                }
                             }
                         }
                     }
