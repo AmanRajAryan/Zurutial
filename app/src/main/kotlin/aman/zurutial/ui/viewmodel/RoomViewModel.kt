@@ -329,7 +329,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                     val actionText = when (state.lastActionType) {
                         "play" -> "played the video"
                         "pause" -> "paused the video"
-                        "seek" -> "seeked"
+                        "seek" -> "seeked to ${formatTime(state.positionMs)}"
                         else -> state.lastActionType
                     }
                     viewModelScope.launch {
@@ -351,23 +351,33 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        var previousMembers = emptySet<String>()
+        var previousMembers = emptyMap<String, String>()
         membersListener = roomRepository.observeMembers(roomCode) { memberList ->
             val activeMembers = memberList.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
-            val currentDeviceIds = activeMembers.map { it.deviceId }.toSet()
+            val currentMap = activeMembers.associate { it.deviceId to it.displayName }
             
             if (previousMembers.isNotEmpty()) {
-                val newMembers = currentDeviceIds - previousMembers
+                val newMembers = currentMap.keys - previousMembers.keys
                 newMembers.forEach { id ->
                     if (id != deviceId) {
-                        val name = activeMembers.find { it.deviceId == id }?.displayName ?: "Someone"
+                        val name = currentMap[id] ?: "Someone"
                         viewModelScope.launch {
                             _toastMessage.emit("$name joined")
                         }
                     }
                 }
+                
+                val leftMembers = previousMembers.keys - currentMap.keys
+                leftMembers.forEach { id ->
+                    if (id != deviceId) {
+                        val name = previousMembers[id] ?: "Someone"
+                        viewModelScope.launch {
+                            _toastMessage.emit("$name left")
+                        }
+                    }
+                }
             }
-            previousMembers = currentDeviceIds
+            previousMembers = currentMap
             _members.value = memberList
             
             log("Members updated: ${activeMembers.size} active out of ${memberList.size} total")
@@ -562,5 +572,17 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     private fun updatePlaybackControl() {
         val room = (uiState.value as? RoomUiState.InRoom)?.room ?: return
         _canControlPlayback.value = room.canMembersControlPlayback || isActingHost()
+    }
+    
+    private fun formatTime(ms: Long): String {
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+        }
     }
 }
