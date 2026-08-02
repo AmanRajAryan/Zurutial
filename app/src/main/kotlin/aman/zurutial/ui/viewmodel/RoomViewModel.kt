@@ -203,19 +203,19 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             .setUserAgent(userAgent)
             .setAllowCrossProtocolRedirects(true)
             
-        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(
-            getApplication<android.app.Application>(),
-            httpDataSourceFactory
-        )
-        
         val cacheInstance = aman.zurutial.media.VideoCache.getInstance(getApplication<android.app.Application>())
         
         val cacheDataSourceFactory = androidx.media3.datasource.cache.CacheDataSource.Factory()
             .setCache(cacheInstance)
-            .setUpstreamDataSourceFactory(dataSourceFactory)
+            .setUpstreamDataSourceFactory(httpDataSourceFactory)
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(
+            getApplication<android.app.Application>(),
+            cacheDataSourceFactory
+        )
             
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(cacheDataSourceFactory)
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
         val exoPlayer = ExoPlayer.Builder(getApplication<android.app.Application>())
             .setMediaSourceFactory(mediaSourceFactory)
