@@ -1,6 +1,7 @@
 package aman.zurutial.ui.viewmodel
 
 import android.app.Application
+import aman.zurutial.data.RecentRoomsManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -21,7 +22,9 @@ import com.google.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 sealed class RoomUiState {
     object Idle : RoomUiState()
@@ -40,6 +43,15 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
+
+    private val _toastMessage = kotlinx.coroutines.flow.MutableSharedFlow<String>()
+    val toastMessage = _toastMessage.asSharedFlow()
+
+    init {
+        viewModelScope.launch {
+            roomRepository.cleanupOldRooms(deviceId)
+        }
+    }
 
     private val _serverPing = MutableStateFlow(0L)
     val serverPing: StateFlow<Long> = _serverPing.asStateFlow()
@@ -65,6 +77,9 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
 
     private var membersListener: ValueEventListener? = null
     private var heartbeatJob: kotlinx.coroutines.Job? = null
+    private var syncJob: kotlinx.coroutines.Job? = null
+    private var pingJob: kotlinx.coroutines.Job? = null
+    private var roomJob: kotlinx.coroutines.Job? = null
 
     var player: ExoPlayer? = null
         private set
@@ -75,8 +90,11 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     private var pingEngine: PingEngine? = null
     private var roomListener: ValueEventListener? = null
     private var playbackStateListener: ValueEventListener? = null
+    private var connectionListener: ValueEventListener? = null
     private var currentRoomCode: String? = null
     private var pickedFile: PickedFile? = null
+    private var currentActingHostId: String? = null
+    private var currentMember: Member? = null
 
     fun getDeviceId(): String = deviceId
 
@@ -93,12 +111,18 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         }
         _uiState.value = RoomUiState.Connecting
         log("Creating room with file hash: ${file.fingerprint}")
-        viewModelScope.launch {
+        roomJob = viewModelScope.launch {
             val result = roomRepository.createRoom(deviceId, file.fingerprint, file.fileName)
             result.fold(
                 onSuccess = { code -> 
                     log("Room created successfully: $code")
-                    enterRoom(code, file) 
+                    RecentRoomsManager.addRoom(getApplication(), code)
+                    try {
+                        enterRoom(code, file) 
+                    } catch (e: Exception) {
+                        log("Failed to initialize room: ${e.message}")
+                        _uiState.value = RoomUiState.Error("Connection lost while initializing")
+                    }
                 },
                 onFailure = { 
                     log("Failed to create room: ${it.message}")
@@ -120,11 +144,25 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             result.fold(
                 onSuccess = { room ->
                     log("Room found: ${room.roomCode}, file: ${room.fileName}")
-                    _uiState.value = RoomUiState.JoinRoomFileSelection(room)
+                    if (room.fileHash.startsWith("http://") || room.fileHash.startsWith("https://")) {
+                        log("Room uses web stream. Auto-joining.")
+                        val urlFile = aman.zurutial.media.PickedFile(
+                            uri = android.net.Uri.parse(room.fileHash),
+                            fileName = room.fileName,
+                            sizeBytes = 0L,
+                            durationMs = 0L,
+                            customFingerprint = room.fileHash
+                        )
+                        setPickedFile(urlFile)
+                        joinRoom(room)
+                    } else {
+                        _uiState.value = RoomUiState.JoinRoomFileSelection(room)
+                    }
                 },
                 onFailure = { 
                     log("Room not found: ${it.message}")
-                    _uiState.value = RoomUiState.Error(it.message ?: "Room not found") 
+                    RecentRoomsManager.removeRoom(getApplication(), roomCode)
+                    _uiState.value = RoomUiState.Error("Room not found or expired")
                 }
             )
         }
@@ -137,14 +175,20 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         }
         _uiState.value = RoomUiState.Connecting
         log("Joining room ${room.roomCode} with local file ${file.fileName}")
-        viewModelScope.launch {
+        roomJob = viewModelScope.launch {
             if (!aman.zurutial.media.FileFingerprint.matches(file, room.fileHash)) {
                 log("File mismatch: local hash=${file.fingerprint}, room hash=${room.fileHash}")
                 _uiState.value = RoomUiState.Error("This isn't the same file as the room")
                 return@launch
             }
             log("File match successful. Entering room.")
-            enterRoom(room.roomCode, file)
+            RecentRoomsManager.addRoom(getApplication(), room.roomCode)
+            try {
+                enterRoom(room.roomCode, file)
+            } catch (e: Exception) {
+                log("Failed to enter room: ${e.message}")
+                _uiState.value = RoomUiState.Error("Connection lost while joining")
+            }
         }
     }
 
@@ -152,18 +196,67 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         currentRoomCode = roomCode
         val roomRef = db.getReference("rooms/$roomCode")
 
-        // Build ExoPlayer pointed at the local file
-        val exoPlayer = ExoPlayer.Builder(getApplication()).build().apply {
+        // Build ExoPlayer pointed at the local file or URL
+        val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent(userAgent)
+            .setAllowCrossProtocolRedirects(true)
+            
+        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(
+            getApplication<android.app.Application>(),
+            httpDataSourceFactory
+        )
+            
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+
+        val exoPlayer = ExoPlayer.Builder(getApplication<android.app.Application>())
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build().apply {
             setMediaItem(MediaItem.fromUri(file.uri))
             prepare()
         }
         player = exoPlayer
 
+        // Add the persistent error listener for mid-movie failures
+        exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val cause = error.cause?.message ?: error.message
+                log("❌ Playback Error: $cause")
+                viewModelScope.launch {
+                    leaveRoom(withError = "Video Error: $cause")
+                }
+            }
+        })
+
         // Estimate clock offset before anything else touches sync
-        val sync = ClockSync(roomRef)
+        val sync = ClockSync(roomRef) { msg -> log(msg) }
         val offset = sync.estimateOffset()
         log("Clock offset est: $offset ms")
         clockSync = sync
+
+        // NEW LAZY REJOIN LOGIC
+        val snapshot = roomRef.get().await()
+        val membersCount = snapshot.child("members").childrenCount
+        if (membersCount == 0L) {
+            val lastActiveAt = snapshot.child("lastActiveAt").getValue(Long::class.java) ?: 0L
+            val isPlaying = snapshot.child("playbackState").child("isPlaying").getValue(Boolean::class.java) ?: false
+            if (isPlaying && lastActiveAt > 0L) {
+                val positionMs = snapshot.child("playbackState").child("positionMs").getValue(Long::class.java) ?: 0L
+                val hostMeasuredAt = snapshot.child("playbackState").child("hostMeasuredAtServerTime").getValue(Long::class.java) ?: 0L
+                val elapsed = lastActiveAt - hostMeasuredAt
+                if (elapsed > 0) {
+                    val newPosition = positionMs + elapsed
+                    log("🧹 Lazy Rejoin: Room abandoned. Pausing at $newPosition ms")
+                    
+                    roomRef.child("playbackState").updateChildren(mapOf(
+                        "isPlaying" to false,
+                        "positionMs" to newPosition,
+                        "hostMeasuredAtServerTime" to com.google.firebase.database.ServerValue.TIMESTAMP,
+                        "lastActionType" to "auto-pause"
+                    )).await()
+                }
+            }
+        }
 
         val engine = PlaybackSyncEngine(exoPlayer, sync, deviceId) { msg -> log(msg) }
         syncEngine = engine
@@ -182,28 +275,55 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             ping.e2ePing.collect { _e2ePing.value = it }
         }
 
-        // Register as a member
-        roomRepository.addMember(
-            roomCode,
-            Member(
-                deviceId = deviceId,
-                displayName = "Guest",
-                joinedAt = System.currentTimeMillis(),
-                lastSeen = System.currentTimeMillis()
-            )
+        // Register as a member on connect/reconnect
+        val displayName = aman.zurutial.data.SettingsManager.getDisplayName(getApplication()).takeIf { it.isNotBlank() } ?: "Guest"
+        currentMember = Member(
+            deviceId = deviceId,
+            displayName = displayName,
+            joinedAt = System.currentTimeMillis(),
+            lastSeen = System.currentTimeMillis()
         )
+        connectionListener = roomRepository.observeConnection { isConnected ->
+            if (isConnected) {
+                log("🔌 Firebase socket connected! Registering presence.")
+                viewModelScope.launch {
+                    currentMember = currentMember?.copy(lastSeen = System.currentTimeMillis())
+                    currentMember?.let { roomRepository.addMember(roomCode, it) }
+                }
+            } else {
+                log("🔌 Firebase socket disconnected!")
+            }
+        }
 
         // Observe room for canMembersControlPlayback changes.
         // NOTE: playbackState updates should be observed separately (see below)
         // since Room and PlaybackState are stored as sibling nodes, not nested.
         roomListener = roomRepository.observeRoom(roomCode) { room ->
             if (room == null) return@observeRoom
-            _canControlPlayback.value = room.canMembersControlPlayback || room.roomCreatorId == deviceId
             _uiState.value = RoomUiState.InRoom(room)
+            updatePlaybackControl()
         }
 
+        var lastToastSeekVersion = -1L
         playbackStateListener = roomRepository.observePlaybackState(roomCode) { state ->
             if (state == null) return@observePlaybackState
+            
+            if (state.seekVersion > lastToastSeekVersion) {
+                lastToastSeekVersion = state.seekVersion
+                if (state.lastActionBy.isNotEmpty() && state.lastActionBy != deviceId && state.lastActionType != "sync") {
+                    val actorName = _members.value.find { it.deviceId == state.lastActionBy }?.displayName ?: "Someone"
+                    val actionText = when (state.lastActionType) {
+                        "play" -> "played the video"
+                        "pause" -> "paused the video"
+                        "seek" -> "seeked"
+                        else -> state.lastActionType
+                    }
+                    viewModelScope.launch {
+                        _toastMessage.emit("$actorName $actionText")
+                    }
+                }
+            }
+
             engine.onBroadcastReceived(
                 aman.zurutial.sync.PlaybackBroadcast(
                     positionMs = state.positionMs,
@@ -217,18 +337,61 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        var previousMembers = emptySet<String>()
         membersListener = roomRepository.observeMembers(roomCode) { memberList ->
+            val activeMembers = memberList.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+            val currentDeviceIds = activeMembers.map { it.deviceId }.toSet()
+            
+            if (previousMembers.isNotEmpty()) {
+                val newMembers = currentDeviceIds - previousMembers
+                newMembers.forEach { id ->
+                    if (id != deviceId) {
+                        val name = activeMembers.find { it.deviceId == id }?.displayName ?: "Someone"
+                        viewModelScope.launch {
+                            _toastMessage.emit("$name joined")
+                        }
+                    }
+                }
+            }
+            previousMembers = currentDeviceIds
             _members.value = memberList
+            
+            log("Members updated: ${activeMembers.size} active out of ${memberList.size} total")
+            
+            updatePlaybackControl()
         }
 
         heartbeatJob = viewModelScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(10_000)
-                roomRepository.updateHeartbeat(roomCode, deviceId)
+                currentMember = currentMember?.copy(lastSeen = System.currentTimeMillis())
+                currentMember?.let { roomRepository.updateHeartbeat(roomCode, it) }
+                
+                // Silent sync pulse from Host
+                if (isActingHost()) {
+                    val exoPlayer = player
+                    if (exoPlayer != null && exoPlayer.playWhenReady) {
+                        val actionId = java.util.UUID.randomUUID().toString()
+                        syncEngine?.markSelfInitiated(actionId)
+                        playbackController?.sendAction(
+                            positionMs = exoPlayer.currentPosition,
+                            isPlaying = true,
+                            actionType = "sync",
+                            actionId = actionId
+                        )
+                    }
+                }
             }
         }
 
-        viewModelScope.launch {
+        syncJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(500)
+                syncEngine?.evaluateDrift()
+            }
+        }
+
+        pingJob = viewModelScope.launch {
             while (true) {
                 pingEngine?.measureServerPing()
                 pingEngine?.measureE2EPing()
@@ -266,6 +429,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    // Removed onTransientPause as Audio Focus handling is removed
+
     fun forceResync() {
         syncEngine?.forceResync()
     }
@@ -273,7 +438,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     fun forceHeartbeat() {
         val code = currentRoomCode ?: return
         viewModelScope.launch {
-            roomRepository.updateHeartbeat(code, deviceId)
+            currentMember = currentMember?.copy(lastSeen = System.currentTimeMillis())
+            currentMember?.let { roomRepository.updateHeartbeat(code, it) }
         }
     }
 
@@ -290,15 +456,88 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    override fun onCleared() {
-        super.onCleared()
+    private fun cleanupRoom() {
         currentRoomCode?.let { code ->
             roomListener?.let { roomRepository.removeRoomListener(code, it) }
             playbackStateListener?.let { roomRepository.removePlaybackStateListener(code, it) }
             membersListener?.let { roomRepository.removeMembersListener(code, it) }
+            connectionListener?.let { roomRepository.removeConnectionListener(it) }
         }
         pingEngine?.stop()
+        roomJob?.cancel()
         heartbeatJob?.cancel()
+        syncJob?.cancel()
+        pingJob?.cancel()
         player?.release()
+        player = null
+        roomListener = null
+        playbackStateListener = null
+        membersListener = null
+        connectionListener = null
+        currentRoomCode = null
+        currentMember = null
+        pickedFile = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        cleanupRoom()
+    }
+
+    fun leaveRoom(withError: String? = null) {
+        val code = currentRoomCode ?: return
+        viewModelScope.launch {
+            try {
+                // Graceful active pause if I am the last person leaving
+                val activeMembers = _members.value.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+                if (activeMembers.size == 1 && activeMembers.first().deviceId == deviceId) {
+                    val exoPlayer = player
+                    if (exoPlayer != null && exoPlayer.playWhenReady) {
+                        log("🚪 Last person leaving gracefully. Pausing video.")
+                        playbackController?.sendAction(
+                            positionMs = exoPlayer.currentPosition,
+                            isPlaying = false,
+                            actionType = "auto-pause",
+                            actionId = java.util.UUID.randomUUID().toString()
+                        )
+                        kotlinx.coroutines.delay(100) // Give network 100ms to send before we kill socket
+                    }
+                }
+                roomRepository.removeMember(code, deviceId)
+            } catch (e: Exception) { }
+        }
+        cleanupRoom()
+        _uiState.value = if (withError != null) RoomUiState.Error(withError) else RoomUiState.Idle
+    }
+
+    fun isActingHost(): Boolean {
+        val room = (uiState.value as? RoomUiState.InRoom)?.room ?: return false
+        val activeMembers = _members.value.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+        val isOriginalHostHere = activeMembers.any { it.deviceId == room.roomCreatorId }
+        
+        val newActingHostId = if (isOriginalHostHere) {
+            room.roomCreatorId
+        } else {
+            val oldestMember = activeMembers.minByOrNull { it.joinedAt }
+            oldestMember?.deviceId ?: room.roomCreatorId
+        }
+
+        val currentlyActing = newActingHostId == deviceId
+        if (currentActingHostId != newActingHostId) {
+            currentActingHostId = newActingHostId
+            if (currentlyActing) {
+                log("👑 Host Migration: You are now the Acting Host!")
+            } else {
+                val name = _members.value.find { it.deviceId == newActingHostId }?.displayName ?: "Someone"
+                log("👑 Host Migration: $name is now the Acting Host!")
+            }
+        }
+
+        return currentlyActing
+    }
+
+    private fun updatePlaybackControl() {
+        val room = (uiState.value as? RoomUiState.InRoom)?.room ?: return
+        _canControlPlayback.value = room.canMembersControlPlayback || isActingHost()
     }
 }

@@ -50,13 +50,32 @@ class RoomRepository(private val db: FirebaseDatabase) {
             .addOnFailureListener { cont.resume(Result.failure(it), onCancellation = null) }
     }
 
-    suspend fun addMember(roomCode: String, member: Member) {
-        db.getReference("rooms/$roomCode/members/${member.deviceId}").setValue(member).await()
+    suspend fun cleanupOldRooms(creatorId: String) {
+        try {
+            val snapshot = roomsRef.orderByChild("roomCreatorId").equalTo(creatorId).get().await()
+            val now = System.currentTimeMillis()
+            for (child in snapshot.children) {
+                val room = child.getValue(Room::class.java) ?: continue
+                // Delete if older than 12 hours
+                if (now - room.createdAt > 12 * 60 * 60 * 1000L) {
+                    child.ref.removeValue().await()
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
     }
 
-    suspend fun updateHeartbeat(roomCode: String, deviceId: String) {
-        db.getReference("rooms/$roomCode/members/$deviceId/lastSeen")
-            .setValue(System.currentTimeMillis())
+    suspend fun addMember(roomCode: String, member: Member) {
+        val memberRef = db.getReference("rooms/$roomCode/members/${member.deviceId}")
+        memberRef.onDisconnect().removeValue()
+        db.getReference("rooms/$roomCode/lastActiveAt").onDisconnect().setValue(com.google.firebase.database.ServerValue.TIMESTAMP)
+        memberRef.setValue(member).await()
+    }
+
+    suspend fun updateHeartbeat(roomCode: String, member: Member) {
+        db.getReference("rooms/$roomCode/members/${member.deviceId}")
+            .setValue(member)
             .await()
     }
 
@@ -132,6 +151,25 @@ class RoomRepository(private val db: FirebaseDatabase) {
     }
 
     suspend fun removeMember(roomCode: String, deviceId: String) {
-        db.getReference("rooms/$roomCode/members/$deviceId").removeValue().await()
+        val memberRef = db.getReference("rooms/$roomCode/members/$deviceId")
+        memberRef.onDisconnect().cancel()
+        db.getReference("rooms/$roomCode/lastActiveAt").onDisconnect().cancel()
+        memberRef.removeValue().await()
+    }
+
+    fun observeConnection(onUpdate: (Boolean) -> Unit): ValueEventListener {
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val isConnected = snapshot.getValue(Boolean::class.java) ?: false
+                onUpdate(isConnected)
+            }
+            override fun onCancelled(error: DatabaseError) { onUpdate(false) }
+        }
+        db.getReference(".info/connected").addValueEventListener(listener)
+        return listener
+    }
+
+    fun removeConnectionListener(listener: ValueEventListener) {
+        db.getReference(".info/connected").removeEventListener(listener)
     }
 }

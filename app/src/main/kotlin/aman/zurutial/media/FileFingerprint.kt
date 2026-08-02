@@ -9,10 +9,11 @@ data class PickedFile(
     val uri: Uri,
     val fileName: String,
     val sizeBytes: Long,
-    val durationMs: Long
+    val durationMs: Long,
+    val customFingerprint: String? = null
 ) {
     val fingerprint: String
-        get() = "${sizeBytes}_${durationMs}"
+        get() = customFingerprint ?: "${sizeBytes}_${durationMs}"
 }
 
 object FileFingerprint {

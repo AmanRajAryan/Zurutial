@@ -7,10 +7,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Divider
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -59,6 +63,31 @@ fun RoomScreen(
     var isDraggingSlider by remember { mutableStateOf(false) }
     var isPlayingUi by remember { mutableStateOf(false) }
     var durationMs by remember { mutableFloatStateOf(1f) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    var videoAspectRatio by remember { mutableFloatStateOf(16f / 9f) }
+
+    DisposableEffect(player) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    val rawRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
+                    // Cap it to 0.8 minimum so extreme vertical videos (9:16) don't 
+                    // become infinitely tall and push all UI controls off the screen.
+                    videoAspectRatio = rawRatio.coerceIn(0.8f, 3.0f)
+                }
+            }
+        }
+        player?.addListener(listener)
+        // Also check if size is already known
+        player?.videoSize?.let {
+            if (it.width > 0 && it.height > 0) {
+                videoAspectRatio = (it.width.toFloat() / it.height.toFloat()).coerceIn(0.8f, 3.0f)
+            }
+        }
+        onDispose {
+            player?.removeListener(listener)
+        }
+    }
 
     // Poll player position periodically to drive the slider (ExoPlayer has no built-in position Flow)
     LaunchedEffect(player) {
@@ -71,6 +100,13 @@ fun RoomScreen(
                 isPlayingUi = it.playWhenReady
             }
             delay(500)
+        }
+    }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.toastMessage.collect { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -89,41 +125,48 @@ fun RoomScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(videoAspectRatio)
+                .background(Color.Black)
+        ) {
             AndroidView(
                 factory = { context ->
-                    PlayerView(context).apply {
+                    androidx.media3.ui.PlayerView(context).apply {
                         useController = false // we're building custom controls below
                         layoutParams = FrameLayout.LayoutParams(
                             FrameLayout.LayoutParams.MATCH_PARENT,
-                            FrameLayout.LayoutParams.WRAP_CONTENT
+                            FrameLayout.LayoutParams.MATCH_PARENT
                         )
-                        this.player = player
+                        this.player = viewModel.player
+                        setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_ALWAYS)
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxSize()
             )
         }
 
         Column(modifier = Modifier.padding(16.dp)) {
 
             val roomCode = (uiState as? RoomUiState.InRoom)?.room?.roomCode ?: ""
+            val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
             if (roomCode.isNotEmpty()) {
-                Text(text = "Room Code: $roomCode", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "Room Code: $roomCode (Tap to copy)", 
+                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable {
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(roomCode))
+                        android.widget.Toast.makeText(context, "Room code copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    }.padding(vertical = 4.dp)
+                )
             }
 
-            val activeCount = members.count {
-                System.currentTimeMillis() - it.lastSeen < 30_000
-            }
-            Text(text = "$activeCount watching")
+            val activeMembers = members.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+            val names = activeMembers.joinToString(", ") { it.displayName }
+            Text(text = "Watching: $names", style = androidx.compose.material3.MaterialTheme.typography.bodyLarge)
 
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(text = "Server: ${serverPing}ms", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
-                if (e2ePing.isNotEmpty()) {
-                    Text(text = "Peer: ${e2ePing.values.maxOrNull() ?: 0}ms", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
-                }
-            }
             Spacer(modifier = Modifier.height(8.dp))
 
             Slider(
@@ -167,30 +210,62 @@ fun RoomScreen(
             }
             
             Spacer(modifier = Modifier.height(16.dp))
-            RoomCreatorControls(uiState = uiState, viewModel = viewModel)
+            RoomCreatorControls(
+                uiState = uiState, 
+                viewModel = viewModel, 
+                isActingHost = viewModel.isActingHost()
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
-            Divider()
-            Text(
-                "Debug Logs:",
-                style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 8.dp)
+            Button(
+                onClick = { viewModel.leaveRoom() },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.error
+                )
             ) {
-                SelectionContainer {
-                    Text(
-                        text = logs.joinToString("\n"),
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            fontSize = 10.sp
-                        ),
-                        modifier = Modifier.verticalScroll(rememberScrollState())
-                    )
+                Text("Leave Room")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            androidx.compose.material3.TextButton(
+                onClick = { showAdvanced = !showAdvanced },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(if (showAdvanced) "Hide Advanced Info" else "Show Advanced Info")
+            }
+
+            if (showAdvanced) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(text = "Server: ${serverPing}ms", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+                    if (e2ePing.isNotEmpty()) {
+                        Text(text = "Peer: ${e2ePing.values.maxOrNull() ?: 0}ms", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Divider()
+                Text(
+                    "Debug Logs:",
+                    style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 8.dp)
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = logs.joinToString("\n"),
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 10.sp
+                            ),
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        )
+                    }
                 }
             }
         }
@@ -198,10 +273,9 @@ fun RoomScreen(
 }
 
 @Composable
-private fun RoomCreatorControls(uiState: RoomUiState, viewModel: RoomViewModel) {
+private fun RoomCreatorControls(uiState: RoomUiState, viewModel: RoomViewModel, isActingHost: Boolean) {
     val room = (uiState as? RoomUiState.InRoom)?.room ?: return
-    val isCreator = room.roomCreatorId == viewModel.getDeviceId()
-    if (!isCreator) return
+    if (!isActingHost) return
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 16.dp),

@@ -11,7 +11,10 @@ import java.util.UUID
 
 data class OffsetSample(val offsetMs: Long, val roundTripMs: Long)
 
-class ClockSync(private val db: DatabaseReference) {
+class ClockSync(
+    private val db: DatabaseReference,
+    private val onLog: (String) -> Unit = {}
+) {
 
     private var currentOffsetMs: Long = 0L
 
@@ -19,20 +22,34 @@ class ClockSync(private val db: DatabaseReference) {
      * Runs N samples, keeps the best half (lowest round-trip), returns median offset.
      * offsetMs represents: serverTime = localTime + offsetMs
      */
-    suspend fun estimateOffset(sampleCount: Int = 5): Long = coroutineScope {
-        val deferredSamples = (1..sampleCount).map { i ->
-            async {
-                delay(i * 50L) // Stagger the requests slightly
-                takeSingleSample()
+    suspend fun estimateOffset(sampleCount: Int = 8): Long = coroutineScope {
+        try {
+            onLog("Starting clock sync ($sampleCount pings)...")
+            val deferredSamples = (1..sampleCount).map { i ->
+                async {
+                    delay(i * 50L) // Stagger the requests slightly
+                    takeSingleSample()
+                }
             }
+            val samples = deferredSamples.awaitAll()
+
+            val bestSamples = samples.sortedBy { it.roundTripMs }.take(sampleCount / 2)
+            val medianOffset = if (bestSamples.isNotEmpty()) bestSamples.map { it.offsetMs }.sorted()[bestSamples.size / 2] else 0L
+
+            onLog("Clock Sync complete. (Best ${bestSamples.size} used)")
+            samples.forEachIndexed { index, sample ->
+                val isUsed = bestSamples.contains(sample)
+                val status = if (isUsed) "[USED]" else "[DISCARDED]"
+                onLog("  -> Ping ${index + 1}: round-trip=${sample.roundTripMs}ms, offset=${sample.offsetMs}ms $status")
+            }
+
+            currentOffsetMs = medianOffset
+            return@coroutineScope medianOffset
+        } catch (e: Exception) {
+            onLog("Clock sync failed: ${e.message}")
+            currentOffsetMs = 0L
+            return@coroutineScope 0L
         }
-        val samples = deferredSamples.awaitAll()
-
-        val bestSamples = samples.sortedBy { it.roundTripMs }.take(sampleCount / 2)
-        val medianOffset = if (bestSamples.isNotEmpty()) bestSamples.map { it.offsetMs }.sorted()[bestSamples.size / 2] else 0L
-
-        currentOffsetMs = medianOffset
-        return@coroutineScope medianOffset
     }
 
     private suspend fun takeSingleSample(): OffsetSample = suspendCancellableCoroutine { cont ->

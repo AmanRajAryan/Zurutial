@@ -10,10 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -26,14 +24,14 @@ class MainActivity : ComponentActivity() {
       ComposeEmptyActivityTheme {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
           val viewModel: RoomViewModel = viewModel()
-          var inRoom by remember { mutableStateOf(false) }
+          val uiState by viewModel.uiState.collectAsState()
 
-          if (inRoom) {
+          if (uiState is aman.zurutial.ui.viewmodel.RoomUiState.InRoom) {
             RoomScreen(viewModel = viewModel)
           } else {
             HomeScreen(
               viewModel = viewModel,
-              onEnteredRoom = { inRoom = true }
+              onEnteredRoom = {}
             )
           }
         }

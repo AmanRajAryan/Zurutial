@@ -24,7 +24,7 @@ class PlaybackSyncEngine(
     private var lastBroadcast: PlaybackBroadcast? = null
 
     // Tunables
-    private val HARD_SEEK_THRESHOLD_MS = 250L      // drift beyond this: snap, don't nudge
+    private val HARD_SEEK_THRESHOLD_MS = 400L      // drift beyond this: snap, don't nudge
     private val NUDGE_DEADZONE_MS = 30L             // drift below this: do nothing, avoid micro-jitter chasing
     private val MAX_RATE_ADJUST = 0.05f             // ±5% speed change, inaudible pitch-wise
 
@@ -73,17 +73,52 @@ class PlaybackSyncEngine(
             player.playWhenReady = broadcast.isPlaying
         }
 
+        evaluateDrift()
+    }
+
+    fun evaluateDrift() {
+        val b = lastBroadcast ?: return
+        
+        // Tough Love: If a member's phone is too slow and enters buffering,
+        // DO NOT force seek them. Seeking flushes the buffer and causes an infinite buffering loop.
+        // Let them buffer in peace. When they finish, they will snap forward to catch up.
+        if (player.playbackState == androidx.media3.common.Player.STATE_BUFFERING) {
+            onLog("-> Buffering... Skipping drift sync.")
+            return
+        }
+
+        val rawTarget = computeTargetPosition(b)
+        val duration = player.duration
+        val maxPos = if (duration > 0) duration else Long.MAX_VALUE
+        val targetPosition = rawTarget.coerceIn(0L, maxPos)
+        val currentPosition = player.currentPosition
+        val drift = targetPosition - currentPosition // positive = we're behind
+
+        if (!b.isPlaying) {
+            resetToNormalSpeed()
+            if (kotlin.math.abs(drift) > NUDGE_DEADZONE_MS) {
+                // When paused, we don't nudge, we just hard snap if off
+                hardSeek(targetPosition, false)
+            }
+            return
+        }
+
         when {
             kotlin.math.abs(drift) > HARD_SEEK_THRESHOLD_MS -> {
                 onLog("-> Hard seeking (drift > 400ms)")
-                hardSeek(targetPosition, broadcast.isPlaying)
+                hardSeek(targetPosition, b.isPlaying)
             }
             kotlin.math.abs(drift) > NUDGE_DEADZONE_MS -> {
-                onLog("-> Applying rate nudge")
-                applyRateNudge(drift)
+                if (player.playbackParameters.speed == 1.0f) {
+                    onLog("-> Applying rate nudge")
+                }
+                val correctionFactor = (drift.toFloat() / 1000f).coerceIn(-MAX_RATE_ADJUST, MAX_RATE_ADJUST)
+                player.playbackParameters = PlaybackParameters(1.0f + correctionFactor)
             }
             else -> {
-                onLog("-> Normal speed")
+                if (player.playbackParameters.speed != 1.0f) {
+                    onLog("-> Normal speed")
+                }
                 resetToNormalSpeed()
             }
         }
@@ -97,13 +132,6 @@ class PlaybackSyncEngine(
         } else {
             b.positionMs
         }
-    }
-
-    private fun applyRateNudge(driftMs: Long) {
-        // Behind (positive drift) -> speed up to catch up. Ahead -> slow down.
-        val correctionFactor = (driftMs.toFloat() / 1000f).coerceIn(-MAX_RATE_ADJUST, MAX_RATE_ADJUST)
-        val newSpeed = 1.0f + correctionFactor
-        player.playbackParameters = PlaybackParameters(newSpeed)
     }
 
     private fun resetToNormalSpeed() {
