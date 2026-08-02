@@ -208,7 +208,6 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         )
         
         val cacheInstance = aman.zurutial.media.VideoCache.getInstance(getApplication<android.app.Application>())
-        log("Disk Cache Active: ${cacheInstance.cacheSpace / 1024 / 1024} MB currently stored.")
         
         val cacheDataSourceFactory = androidx.media3.datasource.cache.CacheDataSource.Factory()
             .setCache(cacheInstance)
@@ -410,6 +409,14 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                 pingEngine?.measureServerPing()
                 pingEngine?.measureE2EPing()
                 kotlinx.coroutines.delay(3000)
+            }
+        }
+        
+        viewModelScope.launch {
+            while (currentRoomCode == roomCode) {
+                val currentMb = cacheInstance.cacheSpace / 1024 / 1024
+                log("Disk Cache Update: $currentMb MB currently stored.")
+                kotlinx.coroutines.delay(10_000)
             }
         }
     }
