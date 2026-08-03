@@ -184,7 +184,9 @@ fun RoomScreen(
     val activeMembers = members.filter { nowServer - it.lastSeen < 30_000 }
     val isActingHost = viewModel.isActingHost()
 
-    val maxPing = (e2ePing.values.maxOrNull() ?: serverPing)
+    val activePeerIds = activeMembers.map { it.deviceId }
+    val activePings = e2ePing.filterKeys { it in activePeerIds }
+    val maxPing = if (activeMembers.size <= 1) serverPing else (activePings.values.maxOrNull() ?: serverPing)
     val syncStatus = when {
         room != null && activeMembers.none { it.deviceId == room.roomCreatorId } && !isActingHost && activeMembers.size <= 1 ->
             SyncStatus(SyncLevel.HOST_DISCONNECTED, "Host disconnected")
@@ -322,14 +324,27 @@ fun RoomScreen(
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                        val currentHostId = viewModel.getActingHostId()
+                        val peerPingDisplay = when {
+                            activeMembers.size <= 1 -> "--"
+                            activePings.isEmpty() -> "--"
+                            isActingHost -> "${activePings.values.maxOrNull() ?: 0}ms"
+                            currentHostId != null && activePings.containsKey(currentHostId) -> "${activePings[currentHostId]}ms"
+                            else -> "${activePings.values.maxOrNull() ?: 0}ms"
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Text(
-                                "Latency: ${maxPing}ms",
+                                "Server: ${serverPing}ms",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "Connection: ${if (maxPing < 150) "Excellent" else if (maxPing < 400) "Good" else "Poor"}",
+                                "Peer: $peerPingDisplay",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Link: ${if (maxPing < 150) "Excellent" else if (maxPing < 400) "Good" else "Poor"}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
