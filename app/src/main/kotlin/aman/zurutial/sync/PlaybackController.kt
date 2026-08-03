@@ -12,14 +12,15 @@ class PlaybackController(
     private val deviceId: String,
     private val onLog: (String) -> Unit = {}
 ) {
-    fun sendAction(positionMs: Long, isPlaying: Boolean, actionType: String, actionId: String) {
-        onLog("Tx [$actionType] play=$isPlaying pos=$positionMs")
+    fun sendAction(positionMs: Long, isPlaying: Boolean, playbackSpeed: Float, actionType: String, actionId: String) {
+        onLog("Tx [$actionType] play=$isPlaying pos=$positionMs speed=$playbackSpeed")
         val stateRef = roomRef.child("playbackState")
 
         val hostMeasuredAt = clockSync.toServerTime(System.currentTimeMillis())
         val updates = mapOf(
             "positionMs" to positionMs,
             "isPlaying" to isPlaying,
+            "playbackSpeed" to playbackSpeed,
             "hostMeasuredAtServerTime" to hostMeasuredAt,
             "seekVersion" to hostMeasuredAt,
             "lastActionBy" to deviceId,

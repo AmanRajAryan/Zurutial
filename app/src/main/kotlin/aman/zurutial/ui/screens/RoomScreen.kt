@@ -116,7 +116,6 @@ fun RoomScreen(
     var videoAspectRatio by remember { mutableFloatStateOf(16f / 9f) }
     var recentActionAtMs by remember { mutableStateOf(0L) }
     var speedMenuOpen by remember { mutableStateOf(false) }
-    var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var debugSheetOpen by remember { mutableStateOf(false) }
     var confettiTrigger by remember { mutableIntStateOf(0) }
     var hasCelebrated by remember { mutableStateOf(false) }
@@ -180,7 +179,9 @@ fun RoomScreen(
     }
 
     val room = (uiState as? RoomUiState.InRoom)?.room
-    val activeMembers = members.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+    val playbackSpeed by viewModel.targetPlaybackSpeed.collectAsState()
+    val nowServer = viewModel.clockSync?.toServerTime(System.currentTimeMillis()) ?: System.currentTimeMillis()
+    val activeMembers = members.filter { nowServer - it.lastSeen < 30_000 }
     val isActingHost = viewModel.isActingHost()
 
     val maxPing = (e2ePing.values.maxOrNull() ?: serverPing)
@@ -311,7 +312,7 @@ fun RoomScreen(
                                     MemberDisplay(
                                         deviceId = member.deviceId,
                                         displayName = member.displayName,
-                                        isHost = member.deviceId == room?.roomCreatorId || (member.deviceId == viewModel.getDeviceId() && isActingHost),
+                                        isHost = member.deviceId == viewModel.getActingHostId(),
                                         presence = if (member.deviceId == viewModel.getDeviceId() && !isPlayingUi) MemberPresence.PAUSED
                                             else if (System.currentTimeMillis() - member.lastSeen > 15_000) MemberPresence.AWAY
                                             else MemberPresence.SYNCED
@@ -461,8 +462,7 @@ fun RoomScreen(
                                         DropdownMenuItem(
                                             text = { Text("${speed}x") },
                                             onClick = {
-                                                playbackSpeed = speed
-                                                player?.setPlaybackSpeed(speed)
+                                                viewModel.onSpeedChanged(speed)
                                                 speedMenuOpen = false
                                             }
                                         )

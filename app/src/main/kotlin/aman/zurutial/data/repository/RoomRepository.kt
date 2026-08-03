@@ -112,6 +112,7 @@ class RoomRepository(private val db: FirebaseDatabase) {
                 val state = aman.zurutial.data.model.PlaybackState(
                     positionMs = snapshot.child("positionMs").getValue(Long::class.java) ?: 0L,
                     isPlaying = snapshot.child("isPlaying").getValue(Boolean::class.java) ?: false,
+                    playbackSpeed = snapshot.child("playbackSpeed").getValue(Float::class.java) ?: 1f,
                     hostMeasuredAtServerTime = snapshot.child("hostMeasuredAtServerTime").getValue(Long::class.java) ?: 0L,
                     seekVersion = snapshot.child("seekVersion").getValue(Long::class.java) ?: 0L,
                     lastActionBy = snapshot.child("lastActionBy").getValue(String::class.java) ?: "",

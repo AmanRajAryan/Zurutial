@@ -72,15 +72,13 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     
-    
-    implementation ("io.github.amanrajaryan:logger:1.0.0")
-    implementation("androidx.documentfile:documentfile:1.0.1")
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-ui:1.5.1")       // for PlayerView
-    implementation("androidx.media3:media3-common:1.5.1")   // MediaItem, Player types
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation(libs.amanrajaryan.logger)
+    implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    
-    implementation(platform("com.google.firebase:firebase-bom:34.17.0"))
-    implementation("com.google.firebase:firebase-database")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.database)
 }

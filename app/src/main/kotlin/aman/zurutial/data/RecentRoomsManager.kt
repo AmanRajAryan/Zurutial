@@ -14,8 +14,7 @@ data class RecentRoom(
  */
 object RecentRoomsManager {
     private const val PREFS_NAME = "recent_rooms_prefs"
-    private const val KEY_ROOMS_V2 = "recent_rooms_v2"
-    private const val KEY_ROOMS_LEGACY = "recent_rooms"
+    private const val KEY_ROOMS = "recent_rooms"
     private const val ENTRY_SEP = "\n"
     private const val FIELD_SEP = "\u0001"
     private const val MAX_ENTRIES = 20
@@ -39,19 +38,11 @@ object RecentRoomsManager {
 
     fun getRecentRoomDetails(context: Context): List<RecentRoom> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val v2 = readEntries(prefs)
-        if (v2.isNotEmpty()) return v2.sortedByDescending { it.lastUsedAt }
-
-        // Migrate from the old unordered String-set format, if present.
-        val legacy = prefs.getStringSet(KEY_ROOMS_LEGACY, emptySet()) ?: emptySet()
-        if (legacy.isEmpty()) return emptyList()
-        val migrated = legacy.map { RecentRoom(it, System.currentTimeMillis(), "") }
-        writeEntries(prefs, migrated)
-        return migrated
+        return readEntries(prefs).sortedByDescending { it.lastUsedAt }
     }
 
     private fun readEntries(prefs: android.content.SharedPreferences): List<RecentRoom> {
-        val raw = prefs.getString(KEY_ROOMS_V2, null) ?: return emptyList()
+        val raw = prefs.getString(KEY_ROOMS, null) ?: return emptyList()
         if (raw.isBlank()) return emptyList()
         return raw.split(ENTRY_SEP).mapNotNull { line ->
             val parts = line.split(FIELD_SEP)
@@ -65,6 +56,6 @@ object RecentRoomsManager {
 
     private fun writeEntries(prefs: android.content.SharedPreferences, entries: List<RecentRoom>) {
         val raw = entries.joinToString(ENTRY_SEP) { "${it.roomCode}$FIELD_SEP${it.lastUsedAt}$FIELD_SEP${it.videoName}" }
-        prefs.edit().putString(KEY_ROOMS_V2, raw).apply()
+        prefs.edit().putString(KEY_ROOMS, raw).apply()
     }
 }

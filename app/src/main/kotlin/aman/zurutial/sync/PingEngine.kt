@@ -21,6 +21,8 @@ class PingEngine(
 
     private val pingsRef = roomRef.child("pings")
 
+    private val lastProcessedRequests = mutableMapOf<String, Long>()
+
     private val requestListener = object : ValueEventListener {
         override fun onDataChange(snapshot: DataSnapshot) {
             snapshot.children.forEach { child ->
@@ -28,7 +30,11 @@ class PingEngine(
                 val timestamp = child.getValue(Long::class.java) ?: return@forEach
                 
                 if (senderId != deviceId && timestamp > 0L) {
-                    pingsRef.child("responses").child(senderId).child(deviceId).setValue(timestamp)
+                    val lastProcessed = lastProcessedRequests[senderId] ?: 0L
+                    if (timestamp > lastProcessed) {
+                        lastProcessedRequests[senderId] = timestamp
+                        pingsRef.child("responses").child(senderId).child(deviceId).setValue(timestamp)
+                    }
                 }
             }
         }

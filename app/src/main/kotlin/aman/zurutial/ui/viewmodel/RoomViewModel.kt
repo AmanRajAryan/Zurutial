@@ -47,6 +47,9 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     private val _toastMessage = kotlinx.coroutines.flow.MutableSharedFlow<String>()
     val toastMessage = _toastMessage.asSharedFlow()
 
+    private val _targetPlaybackSpeed = MutableStateFlow(1f)
+    val targetPlaybackSpeed: StateFlow<Float> = _targetPlaybackSpeed.asStateFlow()
+
     init {
         viewModelScope.launch {
             roomRepository.cleanupOldRooms(deviceId)
@@ -78,6 +81,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     private var membersListener: ValueEventListener? = null
     private var heartbeatJob: kotlinx.coroutines.Job? = null
     private var syncJob: kotlinx.coroutines.Job? = null
+    private var clockSyncJob: kotlinx.coroutines.Job? = null
     private var pingJob: kotlinx.coroutines.Job? = null
     private var roomJob: kotlinx.coroutines.Job? = null
     private var cacheLogJob: kotlinx.coroutines.Job? = null
@@ -85,7 +89,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     var player: ExoPlayer? = null
         private set
 
-    private var clockSync: ClockSync? = null
+    var clockSync: ClockSync? = null
+        private set
     private var playbackController: PlaybackController? = null
     private var syncEngine: PlaybackSyncEngine? = null
     private var pingEngine: PingEngine? = null
@@ -247,6 +252,14 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         val offset = sync.estimateOffset()
         log("Clock offset est: $offset ms")
         clockSync = sync
+        
+        clockSyncJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(60_000) // Re-sync every minute
+                val newOffset = sync.estimateOffset()
+                log("Periodic clock sync est: $newOffset ms")
+            }
+        }
 
         // NEW LAZY REJOIN LOGIC
         val snapshot = roomRef.get().await()
@@ -257,9 +270,10 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             if (isPlaying && lastActiveAt > 0L) {
                 val positionMs = snapshot.child("playbackState").child("positionMs").getValue(Long::class.java) ?: 0L
                 val hostMeasuredAt = snapshot.child("playbackState").child("hostMeasuredAtServerTime").getValue(Long::class.java) ?: 0L
+                val playbackSpeed = snapshot.child("playbackState").child("playbackSpeed").getValue(Float::class.java) ?: 1f
                 val elapsed = lastActiveAt - hostMeasuredAt
                 if (elapsed > 0) {
-                    val newPosition = positionMs + elapsed
+                    val newPosition = positionMs + (elapsed * playbackSpeed).toLong()
                     log("🧹 Lazy Rejoin: Room abandoned. Pausing at $newPosition ms")
                     
                     roomRef.child("playbackState").updateChildren(mapOf(
@@ -272,7 +286,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        val engine = PlaybackSyncEngine(exoPlayer, sync, deviceId) { msg -> log(msg) }
+        val isWebStream = file.uri.scheme == "http" || file.uri.scheme == "https"
+        val engine = PlaybackSyncEngine(exoPlayer, sync, deviceId, isWebStream) { msg -> log(msg) }
         syncEngine = engine
 
         val controller = PlaybackController(roomRef, sync, deviceId) { msg -> log(msg) }
@@ -338,22 +353,35 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            engine.onBroadcastReceived(
-                aman.zurutial.sync.PlaybackBroadcast(
-                    positionMs = state.positionMs,
-                    isPlaying = state.isPlaying,
-                    hostMeasuredAtServerTime = state.hostMeasuredAtServerTime,
-                    seekVersion = state.seekVersion,
-                    lastActionBy = state.lastActionBy,
-                    actionType = state.lastActionType,
-                    lastActionId = state.lastActionId
-                )
+            val broadcast = aman.zurutial.sync.PlaybackBroadcast(
+                positionMs = state.positionMs,
+                isPlaying = state.isPlaying,
+                playbackSpeed = state.playbackSpeed,
+                hostMeasuredAtServerTime = state.hostMeasuredAtServerTime,
+                seekVersion = state.seekVersion,
+                lastActionBy = state.lastActionBy,
+                actionType = state.lastActionType,
+                lastActionId = state.lastActionId
             )
+
+            val isNewAction = broadcast.lastActionId != engine.getLastActionId()
+            if (isNewAction && broadcast.lastActionBy != deviceId) {
+                // If it's a play/pause action, update playWhenReady
+                if (broadcast.actionType == "play" || broadcast.actionType == "pause" || broadcast.actionType == "auto-pause") {
+                    exoPlayer.playWhenReady = broadcast.isPlaying
+                }
+            }
+            
+            // ALWAYS keep the UI speed dropdown perfectly in sync with the network truth
+            _targetPlaybackSpeed.value = broadcast.playbackSpeed
+
+            engine.onBroadcastReceived(broadcast, isActingHost())
         }
 
         var previousMembers = emptyMap<String, String>()
         membersListener = roomRepository.observeMembers(roomCode) { memberList ->
-            val activeMembers = memberList.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+            val nowServer = clockSync?.toServerTime(System.currentTimeMillis()) ?: System.currentTimeMillis()
+            val activeMembers = memberList.filter { nowServer - it.lastSeen < 30_000 }
             val currentMap = activeMembers.associate { it.deviceId to it.displayName }
             
             if (previousMembers.isNotEmpty()) {
@@ -378,7 +406,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             previousMembers = currentMap
-            _members.value = memberList
+            _members.value = activeMembers
             
             log("Members updated: ${activeMembers.size} active out of ${memberList.size} total")
             
@@ -388,7 +416,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         heartbeatJob = viewModelScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(10_000)
-                currentMember = currentMember?.copy(lastSeen = System.currentTimeMillis())
+                val nowServer = clockSync?.toServerTime(System.currentTimeMillis()) ?: System.currentTimeMillis()
+                currentMember = currentMember?.copy(lastSeen = nowServer)
                 currentMember?.let { roomRepository.updateHeartbeat(roomCode, it) }
                 
                 // Silent sync pulse from Host
@@ -400,6 +429,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                         playbackController?.sendAction(
                             positionMs = exoPlayer.currentPosition,
                             isPlaying = true,
+                            playbackSpeed = exoPlayer.playbackParameters.speed,
                             actionType = "sync",
                             actionId = actionId
                         )
@@ -411,7 +441,10 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         syncJob = viewModelScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(500)
-                syncEngine?.evaluateDrift()
+                // The Host is the pacemaker. It should never chase its own broadcasts.
+                if (!isActingHost()) {
+                    syncEngine?.evaluateDrift()
+                }
             }
         }
 
@@ -442,6 +475,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         playbackController?.sendAction(
             positionMs = exoPlayer.currentPosition,
             isPlaying = newPlaying,
+            playbackSpeed = exoPlayer.playbackParameters.speed,
             actionType = if (newPlaying) "play" else "pause",
             actionId = actionId
         )
@@ -456,7 +490,26 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         playbackController?.sendAction(
             positionMs = positionMs,
             isPlaying = exoPlayer.playWhenReady, // Use intent
+            playbackSpeed = exoPlayer.playbackParameters.speed,
             actionType = "seek",
+            actionId = actionId
+        )
+    }
+
+    fun onSpeedChanged(speed: Float) {
+        if (canControlPlayback.value != true) return
+        val exoPlayer = player ?: return
+        
+        _targetPlaybackSpeed.value = speed
+        exoPlayer.playbackParameters = androidx.media3.common.PlaybackParameters(speed)
+        
+        val actionId = java.util.UUID.randomUUID().toString()
+        syncEngine?.markSelfInitiated(actionId)
+        playbackController?.sendAction(
+            positionMs = exoPlayer.currentPosition,
+            isPlaying = exoPlayer.playWhenReady,
+            playbackSpeed = speed,
+            actionType = "speed",
             actionId = actionId
         )
     }
@@ -499,6 +552,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         roomJob?.cancel()
         heartbeatJob?.cancel()
         syncJob?.cancel()
+        clockSyncJob?.cancel()
         pingJob?.cancel()
         cacheLogJob?.cancel()
         player?.release()
@@ -522,7 +576,8 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 // Graceful active pause if I am the last person leaving
-                val activeMembers = _members.value.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+                val nowServer = clockSync?.toServerTime(System.currentTimeMillis()) ?: System.currentTimeMillis()
+                val activeMembers = _members.value.filter { nowServer - it.lastSeen < 30_000 }
                 if (activeMembers.size == 1 && activeMembers.first().deviceId == deviceId) {
                     val exoPlayer = player
                     if (exoPlayer != null && exoPlayer.playWhenReady) {
@@ -530,6 +585,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                         playbackController?.sendAction(
                             positionMs = exoPlayer.currentPosition,
                             isPlaying = false,
+                            playbackSpeed = exoPlayer.playbackParameters.speed,
                             actionType = "auto-pause",
                             actionId = java.util.UUID.randomUUID().toString()
                         )
@@ -543,23 +599,37 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = if (withError != null) RoomUiState.Error(withError) else RoomUiState.Idle
     }
 
-    fun isActingHost(): Boolean {
-        val room = (uiState.value as? RoomUiState.InRoom)?.room ?: return false
-        val activeMembers = _members.value.filter { System.currentTimeMillis() - it.lastSeen < 30_000 }
+    fun getActingHostId(): String? {
+        val room = (uiState.value as? RoomUiState.InRoom)?.room ?: return null
+        if (room.roomCreatorId == deviceId) {
+            return deviceId
+        }
+        
+        val nowServer = clockSync?.toServerTime(System.currentTimeMillis()) ?: System.currentTimeMillis()
+        val activeMembers = _members.value.filter { nowServer - it.lastSeen < 30_000 }
         val isOriginalHostHere = activeMembers.any { it.deviceId == room.roomCreatorId }
         
-        val newActingHostId = if (isOriginalHostHere) {
+        return if (isOriginalHostHere) {
             room.roomCreatorId
         } else {
             val oldestMember = activeMembers.minByOrNull { it.joinedAt }
             oldestMember?.deviceId ?: room.roomCreatorId
         }
+    }
 
+    fun isActingHost(): Boolean {
+        val newActingHostId = getActingHostId() ?: return false
         val currentlyActing = newActingHostId == deviceId
+
         if (currentActingHostId != newActingHostId) {
             currentActingHostId = newActingHostId
+            val room = (uiState.value as? RoomUiState.InRoom)?.room
+            if (room != null) {
+                _canControlPlayback.value = room.canMembersControlPlayback || currentlyActing
+            }
             if (currentlyActing) {
                 log("👑 Host Migration: You are now the Acting Host!")
+                player?.playbackParameters = androidx.media3.common.PlaybackParameters(_targetPlaybackSpeed.value)
             } else {
                 val name = _members.value.find { it.deviceId == newActingHostId }?.displayName ?: "Someone"
                 log("👑 Host Migration: $name is now the Acting Host!")

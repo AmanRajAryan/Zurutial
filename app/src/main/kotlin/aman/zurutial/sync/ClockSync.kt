@@ -28,10 +28,12 @@ class ClockSync(
             val deferredSamples = (1..sampleCount).map { i ->
                 async {
                     delay(i * 50L) // Stagger the requests slightly
-                    takeSingleSample()
+                    kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                        takeSingleSample()
+                    }
                 }
             }
-            val samples = deferredSamples.awaitAll()
+            val samples = deferredSamples.awaitAll().filterNotNull()
 
             val bestSamples = samples.sortedBy { it.roundTripMs }.take(sampleCount / 2)
             val medianOffset = if (bestSamples.isNotEmpty()) bestSamples.map { it.offsetMs }.sorted()[bestSamples.size / 2] else 0L

@@ -12,6 +12,7 @@ data class Room(
 data class PlaybackState(
     val positionMs: Long = 0L,
     val isPlaying: Boolean = false,
+    val playbackSpeed: Float = 1f,
     val hostMeasuredAtServerTime: Long = 0L,
     val seekVersion: Long = 0L,
     val lastActionBy: String = "",

@@ -122,7 +122,7 @@ fun OnboardingScreen(onContinue: (displayName: String) -> Unit) {
         }
 
         Text(
-            text = "Your display name is only shared with people in your watch rooms. Video files never leave your device unless you choose to stream them.",
+            text = "Your display name is only shared with people in your watch rooms. Video files are played locally and never leave your device.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
