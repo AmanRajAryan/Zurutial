@@ -22,7 +22,7 @@ android {
 
     signingConfigs {
         if (project.hasProperty("RELEASE_STORE_FILE")) {
-            create("release") {
+            maybeCreate("release").apply {
                 storeFile = file(project.property("RELEASE_STORE_FILE") as String)
                 storePassword = project.property("RELEASE_STORE_PASSWORD") as String
                 keyAlias = project.property("RELEASE_KEY_ALIAS") as String
@@ -68,6 +68,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     

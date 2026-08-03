@@ -117,7 +117,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             result.fold(
                 onSuccess = { code -> 
                     log("Room created successfully: $code")
-                    RecentRoomsManager.addRoom(getApplication(), code)
+                    RecentRoomsManager.addRoom(getApplication(), code, file.fileName)
                     try {
                         enterRoom(code, file) 
                     } catch (e: Exception) {
@@ -183,7 +183,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             log("File match successful. Entering room.")
-            RecentRoomsManager.addRoom(getApplication(), room.roomCode)
+            RecentRoomsManager.addRoom(getApplication(), room.roomCode, room.fileName)
             try {
                 enterRoom(room.roomCode, file)
             } catch (e: Exception) {
