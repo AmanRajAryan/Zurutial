@@ -1,59 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Zurutial adaptive icon foreground.
-  A solid purple badge holds a white ring + Play glyph; two purple arrows
-  orbit outside the badge with 180-degree rotational symmetry (top arrow
-  curls down-right, bottom arrow curls up-left) — reading as
-  Play + Sync + Loop + Together. All content stays within the 66dp
-  adaptive-icon safe zone.
--->
+<!-- Splash screen icon (androidx Core SplashScreen). Same badge mark as the launcher. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
+    android:width="160dp"
+    android:height="160dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Badge circle -->
-    <path android:pathData="M75,54 A21,21 0 1 1 33,54 A21,21 0 1 1 75,54 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="linear"
-                android:startX="33"
-                android:startY="33"
-                android:endX="75"
-                android:endY="75"
-                android:startColor="#7A4FE0"
-                android:centerColor="#9A6BFF"
-                android:endColor="#D7C2FF" />
-        </aapt:attr>
-    </path>
-    <!-- Top arrow -->
+    <path android:pathData="M75,54 A21,21 0 1 1 33,54 A21,21 0 1 1 75,54 Z" android:fillColor="#FFFFFFFF" android:fillAlpha="0.15" />
     <path
         android:pathData="M34.22,34.90 A27.50,27.50 0 0 1 79.50,43.70"
-        android:strokeColor="#FF7A4FE0"
+        android:strokeColor="#FFFFFFFF"
         android:strokeWidth="5.6"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
     <path
         android:pathData="M76.94,46.13 Q75.97,45.12 77.27,44.60 L81.72,42.80 Q83.02,42.27 83.03,43.67 L83.05,51.11 Q83.06,52.51 82.09,51.50 Z"
-        android:fillColor="#FF7A4FE0" />
-    <!-- Bottom arrow (180-degree rotational twin of the top arrow) -->
+        android:fillColor="#FFFFFFFF" />
     <path
         android:pathData="M73.78,73.10 A27.50,27.50 0 0 1 28.50,64.30"
-        android:strokeColor="#FF7A4FE0"
+        android:strokeColor="#FFFFFFFF"
         android:strokeWidth="5.6"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
     <path
         android:pathData="M24.97,64.33 Q24.98,65.73 26.28,65.20 L30.73,63.40 Q32.03,62.88 31.06,61.87 L25.91,56.50 Q24.94,55.49 24.95,56.89 Z"
-        android:fillColor="#FF7A4FE0" />
-    <!-- White ring -->
+        android:fillColor="#FFFFFFFF" />
     <path
         android:pathData="M71.6,54 A17.6,17.6 0 1 1 36.4,54 A17.6,17.6 0 1 1 71.6,54 Z"
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2.1"
         android:fillColor="#00000000" />
-    <!-- Play triangle -->
     <path
         android:pathData="M49.13,45.30 Q47.69,44.40 47.69,46.10 L47.69,61.90 Q47.69,63.60 49.13,62.70 L61.55,54.90 Q62.99,54.00 61.55,53.10 Z"
         android:fillColor="#FFFFFFFF" />

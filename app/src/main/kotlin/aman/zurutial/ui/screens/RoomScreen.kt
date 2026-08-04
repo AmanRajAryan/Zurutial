@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -84,6 +85,7 @@ import aman.zurutial.ui.components.MemberPresence
 import aman.zurutial.ui.components.SyncLevel
 import aman.zurutial.ui.components.SyncStatus
 import aman.zurutial.ui.components.SyncStatusChip
+import aman.zurutial.ui.player.FullScreenPlayerScreen
 import aman.zurutial.ui.theme.ExtraShapes
 import aman.zurutial.ui.viewmodel.RoomUiState
 import aman.zurutial.ui.viewmodel.RoomViewModel
@@ -117,6 +119,7 @@ fun RoomScreen(
     var recentActionAtMs by remember { mutableStateOf(0L) }
     var speedMenuOpen by remember { mutableStateOf(false) }
     var debugSheetOpen by remember { mutableStateOf(false) }
+    var fullscreenOpen by remember { mutableStateOf(false) }
     var confettiTrigger by remember { mutableIntStateOf(0) }
     var hasCelebrated by remember { mutableStateOf(false) }
     val debugLogsEnabled = remember { SettingsManager.getDebugLogsEnabled(context) }
@@ -215,10 +218,14 @@ fun RoomScreen(
                                 FrameLayout.LayoutParams.MATCH_PARENT,
                                 FrameLayout.LayoutParams.MATCH_PARENT
                             )
-                            this.player = viewModel.player
                             setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_ALWAYS)
                         }
                     },
+                    // A single ExoPlayer can only have one attached video surface at a
+                    // time. While the full-screen player owns it, this inline surface
+                    // releases its reference instead of fighting over it; it reclaims
+                    // the player automatically the moment fullscreenOpen flips back.
+                    update = { it.player = if (fullscreenOpen) null else player },
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -254,6 +261,15 @@ fun RoomScreen(
                         .statusBarsPadding()
                         .padding(12.dp)
                 )
+
+                IconButton(
+                    onClick = { fullscreenOpen = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                ) {
+                    Icon(Icons.Filled.Fullscreen, contentDescription = "Full screen", tint = Color.White)
+                }
 
                 ConfettiBurst(trigger = confettiTrigger, modifier = Modifier.fillMaxSize())
             }
@@ -526,6 +542,13 @@ fun RoomScreen(
             logs = logs,
             onDismiss = { debugSheetOpen = false },
             onClear = { /* logs are append-only in the viewmodel by design */ }
+        )
+    }
+
+    if (fullscreenOpen) {
+        FullScreenPlayerScreen(
+            viewModel = viewModel,
+            onExitFullscreen = { fullscreenOpen = false }
         )
     }
 }

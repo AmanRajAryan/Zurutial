@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar notification icon (flat alpha silhouette — color is ignored
+  by the system, only alpha matters). Ring and Play are cut as negative
+  space via evenOdd so they stay visible as holes in the badge.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillType="evenOdd"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M19.20,12.00 A7.20,7.20 0 1 1 4.80,12.00 A7.20,7.20 0 1 1 19.20,12.00 Z
+                           M18.48,12.00 A6.47,6.47 0 1 1 5.53,12.00 A6.47,6.47 0 1 1 18.48,12.00 Z
+                           M17.62,12.00 A5.62,5.62 0 1 1 6.38,12.00 A5.62,5.62 0 1 1 17.62,12.00 Z
+                           M10.33,9.02 Q9.82,8.70 9.82,9.30 L9.82,14.70 Q9.82,15.30 10.33,14.98 L14.57,12.32 Q15.07,12.00 14.57,11.68 Z" />
+    <path
+        android:pathData="M5.09,5.33 A9.60,9.60 0 0 1 20.90,8.40"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M20.00,9.27 Q19.65,8.91 20.11,8.72 L21.69,8.09 Q22.15,7.90 22.15,8.40 L22.14,10.96 Q22.14,11.46 21.79,11.11 Z"
+        android:fillColor="#FFFFFFFF" />
+    <path
+        android:pathData="M18.91,18.67 A9.60,9.60 0 0 1 3.10,15.60"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M1.85,15.60 Q1.85,16.10 2.31,15.91 L3.89,15.28 Q4.35,15.09 4.00,14.73 L2.21,12.89 Q1.86,12.54 1.86,13.04 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

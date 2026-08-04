@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.core.splashscreen)
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.database)

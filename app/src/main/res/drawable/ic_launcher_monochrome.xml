@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Monochrome layer for Android 13+ themed icons. Single opaque color —
+  the system supplies the tint. The ring and Play glyph are cut as
+  negative space (evenOdd fill) so the badge silhouette still reads
+  the same shape as the full-color icon.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillType="evenOdd"
+        android:fillColor="#FF000000"
+        android:pathData="M75,54 A21,21 0 1 1 33,54 A21,21 0 1 1 75,54 Z
+                           M72.65,54 A18.65,18.65 0 1 1 35.35,54 A18.65,18.65 0 1 1 72.65,54 Z
+                           M70.55,54 A16.55,16.55 0 1 1 37.45,54 A16.55,16.55 0 1 1 70.55,54 Z
+                           M49.13,45.30 Q47.69,44.40 47.69,46.10 L47.69,61.90 Q47.69,63.60 49.13,62.70 L61.55,54.90 Q62.99,54.00 61.55,53.10 Z" />
+    <path
+        android:pathData="M34.22,34.90 A27.50,27.50 0 0 1 79.50,43.70"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="5.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M76.94,46.13 Q75.97,45.12 77.27,44.60 L81.72,42.80 Q83.02,42.27 83.03,43.67 L83.05,51.11 Q83.06,52.51 82.09,51.50 Z"
+        android:fillColor="#FF000000" />
+    <path
+        android:pathData="M73.78,73.10 A27.50,27.50 0 0 1 28.50,64.30"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="5.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M24.97,64.33 Q24.98,65.73 26.28,65.20 L30.73,63.40 Q32.03,62.88 31.06,61.87 L25.91,56.50 Q24.94,55.49 24.95,56.89 Z"
+        android:fillColor="#FF000000" />
+</vector>

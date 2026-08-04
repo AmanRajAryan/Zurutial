@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Zurutial master logo — scalable source. 108x108 viewBox matches Android adaptive-icon grid. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 108 108">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F3EEFF"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="33" y1="33" x2="75" y2="75" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7A4FE0"/>
+      <stop offset="55%" stop-color="#9A6BFF"/>
+      <stop offset="100%" stop-color="#D7C2FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="108" height="108" fill="url(#bg)"/>
+  <!-- badge circle -->
+  <circle cx="54" cy="54" r="21" fill="url(#badge)"/>
+  <!-- top arrow (rotating above) -->
+  <path d="M34.22,34.90 A27.5,27.5 0 0 1 79.50,43.70" fill="none" stroke="#7A4FE0" stroke-width="5.6" stroke-linecap="round"/>
+  <path d="M76.94,46.13 Q75.97,45.12 77.27,44.60 L81.72,42.80 Q83.02,42.27 83.03,43.67 L83.05,51.11 Q83.06,52.51 82.09,51.50 Z" fill="#7A4FE0"/>
+  <!-- bottom arrow (rotating below) — 180deg rotational twin of the top arrow -->
+  <path d="M73.78,73.10 A27.5,27.5 0 0 1 28.50,64.30" fill="none" stroke="#7A4FE0" stroke-width="5.6" stroke-linecap="round"/>
+  <path d="M24.97,64.33 Q24.98,65.73 26.28,65.20 L30.73,63.40 Q32.03,62.88 31.06,61.87 L25.91,56.50 Q24.94,55.49 24.95,56.89 Z" fill="#7A4FE0"/>
+  <!-- white ring -->
+  <circle cx="54" cy="54" r="17.6" fill="none" stroke="#FFFFFF" stroke-width="2.1"/>
+  <!-- center play triangle, rounded corners -->
+  <path d="M49.13,45.30 Q47.69,44.40 47.69,46.10 L47.69,61.90 Q47.69,63.60 49.13,62.70 L61.55,54.90 Q62.99,54.00 61.55,53.10 Z" fill="#FFFFFF"/>
+</svg>
