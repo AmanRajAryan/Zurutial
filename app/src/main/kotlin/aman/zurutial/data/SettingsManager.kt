@@ -18,6 +18,7 @@ object SettingsManager {
     private const val KEY_AUTO_SYNC = "auto_sync"
     private const val KEY_SEEK_SENSITIVITY = "seek_sensitivity" // 0f..1f
     private const val KEY_DEBUG_LOGS_ENABLED = "debug_logs_enabled"
+    private const val KEY_PIP_MODE = "pip_mode" // "always" | "playing" | "never"
 
     fun getDisplayName(context: Context): String {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -70,6 +71,14 @@ object SettingsManager {
 
     fun setDebugLogsEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_DEBUG_LOGS_ENABLED, enabled).apply()
+    }
+
+    /** One of "always", "playing", "never". Controls when we auto-enter native Android PiP. */
+    fun getPipMode(context: Context): String =
+        prefs(context).getString(KEY_PIP_MODE, "playing") ?: "playing"
+
+    fun setPipMode(context: Context, mode: String) {
+        prefs(context).edit().putString(KEY_PIP_MODE, mode).apply()
     }
 
     private fun prefs(context: Context) =

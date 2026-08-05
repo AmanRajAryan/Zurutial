@@ -50,6 +50,15 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
     private val _targetPlaybackSpeed = MutableStateFlow(1f)
     val targetPlaybackSpeed: StateFlow<Float> = _targetPlaybackSpeed.asStateFlow()
 
+    // Surfaces audio-decoding problems (e.g. an unsupported E-AC-3 track) to the UI so
+    // it can show a Material dialog instead of silently failing or dropping the room.
+    private val _audioIssue = MutableStateFlow<String?>(null)
+    val audioIssue: StateFlow<String?> = _audioIssue.asStateFlow()
+    fun dismissAudioIssue() { _audioIssue.value = null }
+
+    private var lastKnownAudioGroups: List<androidx.media3.common.Tracks.Group> = emptyList()
+    private val triedAudioTrackKeys = mutableSetOf<String>()
+
     init {
         viewModelScope.launch {
             roomRepository.cleanupOldRooms(deviceId)
@@ -222,7 +231,15 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
+        // setEnableDecoderFallback lets ExoPlayer itself try a secondary/software decoder
+        // when the preferred one fails to initialize (e.g. no hardware E-AC-3 decoder on
+        // this device). This is purely a decoding-layer setting; it does not touch
+        // networking, room state, or playback synchronization.
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(getApplication())
+            .setEnableDecoderFallback(true)
+
         val exoPlayer = ExoPlayer.Builder(getApplication<android.app.Application>())
+            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .build().apply {
             setMediaItem(MediaItem.fromUri(file.uri))
@@ -235,14 +252,31 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
             prepare()
         }
         player = exoPlayer
+        triedAudioTrackKeys.clear()
+        lastKnownAudioGroups = emptyList()
+
+        // Keep track of the audio tracks the container actually offers, so that if the
+        // currently selected one fails to decode we know what else is available to fall
+        // back to.
+        exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val audioGroups = tracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO }
+                if (audioGroups.isNotEmpty()) lastKnownAudioGroups = audioGroups
+            }
+        })
 
         // Add the persistent error listener for mid-movie failures
         exoPlayer.addListener(object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                val cause = error.cause?.message ?: error.message
-                log("❌ Playback Error: $cause")
-                viewModelScope.launch {
-                    leaveRoom(withError = "Video Error: $cause")
+                val cause = error.cause?.message ?: error.message ?: "Unknown error"
+                if (isAudioDecoderError(error)) {
+                    log("⚠️ Audio decoder issue ($cause) — attempting graceful fallback")
+                    handleAudioDecoderFailure(exoPlayer)
+                } else {
+                    log("❌ Playback Error: $cause")
+                    viewModelScope.launch {
+                        leaveRoom(withError = "Video Error: $cause")
+                    }
                 }
             }
         })
@@ -644,6 +678,78 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         _canControlPlayback.value = room.canMembersControlPlayback || isActingHost()
     }
     
+    /**
+     * True only for decoder/audio-track initialization failures (e.g. "Decoder init
+     * failed... audio/eac3" when a device has no E-AC-3 decoder). Anything else keeps
+     * the existing leaveRoom(withError=...) behavior untouched.
+     */
+    private fun isAudioDecoderError(error: androidx.media3.common.PlaybackException): Boolean {
+        val decoderCodes = setOf(
+            androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+            androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
+        )
+        if (error.errorCode !in decoderCodes) return false
+        val message = (error.cause?.message ?: error.message ?: "").lowercase()
+        return message.contains("audio")
+    }
+
+    /**
+     * Local, UI-facing recovery only: try an alternate audio track the container already
+     * exposed, or disable audio entirely so video keeps playing. Resumes at the same
+     * position and lets the existing PlaybackSyncEngine correct any resulting drift on
+     * its normal cadence — this function never touches sync/room/network code.
+     */
+    private fun handleAudioDecoderFailure(exoPlayer: ExoPlayer) {
+        val resumePositionMs = exoPlayer.currentPosition.coerceAtLeast(0)
+
+        lastKnownAudioGroups.forEach { group ->
+            for (i in 0 until group.length) {
+                if (group.isTrackSelected(i)) {
+                    val fmt = group.getTrackFormat(i)
+                    triedAudioTrackKeys.add("${fmt.id}:${fmt.sampleMimeType}")
+                }
+            }
+        }
+
+        var fallbackGroup: androidx.media3.common.Tracks.Group? = null
+        var fallbackIndex = -1
+        outer@ for (group in lastKnownAudioGroups) {
+            for (i in 0 until group.length) {
+                val fmt = group.getTrackFormat(i)
+                val key = "${fmt.id}:${fmt.sampleMimeType}"
+                if (key !in triedAudioTrackKeys) {
+                    fallbackGroup = group
+                    fallbackIndex = i
+                    break@outer
+                }
+            }
+        }
+
+        val builder = exoPlayer.trackSelectionParameters.buildUpon()
+        if (fallbackGroup != null) {
+            val fmt = fallbackGroup.getTrackFormat(fallbackIndex)
+            val label = fmt.label ?: fmt.language ?: fmt.sampleMimeType ?: "alternate track"
+            log("Falling back to alternate audio track: $label")
+            builder
+                .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, false)
+                .setOverrideForType(
+                    androidx.media3.common.TrackSelectionOverride(fallbackGroup.mediaTrackGroup, fallbackIndex)
+                )
+            _audioIssue.value = "The original audio track isn't supported on this device — switched to \"$label\"."
+        } else {
+            log("No alternate audio track available — disabling audio, video will continue")
+            builder.setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true)
+            _audioIssue.value = "This video's audio format isn't supported on this device. Audio has been turned off so playback can continue."
+        }
+        exoPlayer.trackSelectionParameters = builder.build()
+
+        exoPlayer.prepare()
+        exoPlayer.seekTo(resumePositionMs)
+        exoPlayer.playWhenReady = true
+    }
+
     private fun formatTime(ms: Long): String {
         val totalSeconds = ms / 1000
         val hours = totalSeconds / 3600

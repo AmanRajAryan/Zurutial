@@ -15,10 +15,13 @@ import aman.zurutial.ui.theme.ComposeEmptyActivityTheme
 import aman.zurutial.ui.theme.Motion
 import aman.zurutial.ui.viewmodel.RoomUiState
 import aman.zurutial.ui.viewmodel.RoomViewModel
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,6 +43,18 @@ private sealed class TopScreen {
 }
 
 class MainActivity : ComponentActivity() {
+
+    // Same ViewModelStoreOwner (this Activity) as the `viewModel()` call used inside
+    // setContent below, so this resolves to the identical RoomViewModel instance —
+    // needed here because onUserLeaveHint/onPictureInPictureModeChanged aren't
+    // composables and can't call `viewModel()` themselves.
+    private val roomViewModelForPip: RoomViewModel by viewModels()
+
+    // Shared with the composition below so the UI can hide its chrome while the
+    // system has us shrunk into a PiP window. Native Android PiP only — no custom
+    // floating player is created.
+    private val isInPip = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -50,6 +65,7 @@ class MainActivity : ComponentActivity() {
             var pureBlack by remember { mutableStateOf(SettingsManager.getPureBlackEnabled(context)) }
             var dynamicColor by remember { mutableStateOf(SettingsManager.getDynamicColorEnabled(context)) }
             var darkMode by remember { mutableStateOf(SettingsManager.getDarkThemeMode(context)) }
+            val inPip by isInPip
 
             ComposeEmptyActivityTheme(
                 darkTheme = if (darkMode == "system") androidx.compose.foundation.isSystemInDarkTheme() else darkMode == "dark",
@@ -96,6 +112,7 @@ class MainActivity : ComponentActivity() {
 
                             "room" -> RoomScreen(
                                 viewModel = viewModel,
+                                isInPip = inPip,
                                 onExit = {
                                     joinFlowActive = false
                                     topScreen = TopScreen.Main
@@ -186,6 +203,43 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    /** Called when the user is about to leave via Home/Recents — the standard hook for auto-PiP. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        maybeEnterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isInPip.value = isInPictureInPictureMode
+    }
+
+    private fun maybeEnterPip() {
+        if (Build.VERSION.SDK_INT < 24) return
+        val mode = SettingsManager.getPipMode(this)
+        if (mode == "never") return
+        if (roomViewModelForPip.uiState.value !is RoomUiState.InRoom) return
+        val player = roomViewModelForPip.player ?: return
+        if (mode == "playing" && !player.isPlaying) return
+
+        try {
+            val videoSize = player.videoSize
+            val ratio = if (videoSize.width > 0 && videoSize.height > 0) {
+                val raw = videoSize.width.toFloat() / videoSize.height.toFloat()
+                val clamped = raw.coerceIn(0.42f, 2.39f)
+                android.util.Rational((clamped * 1000).toInt(), 1000)
+            } else {
+                android.util.Rational(16, 9)
+            }
+            val params = android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(ratio)
+                .build()
+            enterPictureInPictureMode(params)
+        } catch (_: Exception) {
+            // Device doesn't support PiP for this app/state — just stay in normal mode.
         }
     }
 }

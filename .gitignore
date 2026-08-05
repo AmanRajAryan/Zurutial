@@ -39,5 +39,6 @@ build/
 *.keystore
 
 # Google Services (if you want to ignore it)
-# google-services.json
+google-services.json
 .kotlin/
+.idea/

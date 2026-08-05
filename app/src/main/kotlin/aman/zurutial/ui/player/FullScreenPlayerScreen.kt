@@ -2,7 +2,6 @@ package aman.zurutial.ui.player
 
 import android.app.Activity
 import android.content.Context
-import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -16,13 +15,20 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,11 +51,14 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.BrightnessMedium
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.ScreenRotation
@@ -76,9 +85,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -86,6 +97,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -97,17 +109,30 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import aman.zurutial.ui.components.SyncLevel
+import aman.zurutial.ui.components.SyncStatus
 import aman.zurutial.ui.theme.ExtraShapes
+import aman.zurutial.ui.theme.ZurutialTheme
 import aman.zurutial.ui.viewmodel.RoomViewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
-/** How the video frame is scaled to fill the surface — mirrors PlayerView's own resize modes. */
+/** How the video frame is scaled to fill the surface — mirrors PlayerView's own resize modes,
+ *  plus a 4th "Original" mode that letterboxes to the source's natural aspect. */
 enum class ScreenFitMode(val label: String) {
     FIT("Fit"),
-    FILL("Fill"),
-    ZOOM("Zoom")
+    CROP("Crop"),
+    STRETCH("Stretch"),
+    ORIGINAL("Original")
+}
+
+/** 0/90/180/270 — a purely visual rotation of the video surface, independent of playback. */
+private enum class RotateAngle(val degrees: Float, val label: String) {
+    R0(0f, "0°"),
+    R90(90f, "90°"),
+    R180(180f, "180°"),
+    R270(270f, "270°")
 }
 
 private enum class TrackSheetType { AUDIO, SUBTITLE }
@@ -122,6 +147,8 @@ private enum class TrackSheetType { AUDIO, SUBTITLE }
 fun FullScreenPlayerScreen(
     viewModel: RoomViewModel,
     onExitFullscreen: () -> Unit,
+    fileName: String = "",
+    syncStatus: SyncStatus? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -192,12 +219,37 @@ fun FullScreenPlayerScreen(
 
     // ---- Screen fit / rotation ----
     var fitMode by remember { mutableStateOf(ScreenFitMode.FIT) }
-    var orientationLocked by remember { mutableStateOf(false) }
+    var rotateAngle by remember { mutableStateOf(RotateAngle.R0) }
 
     // ---- Sheets ----
     var speedSheetOpen by remember { mutableStateOf(false) }
     var trackSheet by remember { mutableStateOf<TrackSheetType?>(null) }
     var adjustSheetOpen by remember { mutableStateOf(false) }
+    var moreSheetOpen by remember { mutableStateOf(false) }
+    var screenFitSheetOpen by remember { mutableStateOf(false) }
+    var rotateSheetOpen by remember { mutableStateOf(false) }
+
+    // ---- Native Android Picture-in-Picture ----
+    fun enterPip() {
+        if (android.os.Build.VERSION.SDK_INT < 24) return
+        val act = activity ?: return
+        try {
+            val vs = player?.videoSize
+            val ratio = if (vs != null && vs.width > 0 && vs.height > 0) {
+                val raw = vs.width.toFloat() / vs.height.toFloat()
+                val clamped = raw.coerceIn(0.42f, 2.39f) // valid PictureInPictureParams bounds
+                android.util.Rational((clamped * 1000).toInt(), 1000)
+            } else {
+                android.util.Rational(16, 9)
+            }
+            val params = android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(ratio)
+                .build()
+            act.enterPictureInPictureMode(params)
+        } catch (_: Exception) {
+            // Device/manufacturer doesn't support PiP — fail silently, controls remain usable.
+        }
+    }
 
     // ---- Brightness / volume gestures ----
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -255,25 +307,40 @@ fun FullScreenPlayerScreen(
         // ---- Video surface ----
         val resizeMode = when (fitMode) {
             ScreenFitMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-            ScreenFitMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            ScreenFitMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            ScreenFitMode.CROP -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            ScreenFitMode.STRETCH -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            ScreenFitMode.ORIGINAL -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
         }
-        androidx.compose.ui.viewinterop.AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    useController = false
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                    this.player = player
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
-                }
-            },
-            update = { it.resizeMode = resizeMode; it.player = player },
-            onRelease = { it.player = null },
-            modifier = Modifier.fillMaxSize()
-        )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            // Rotation is a purely visual transform of the surface, not stream metadata —
+            // when turned 90/270 we scale it down to the container's inverse aspect so the
+            // rotated frame doesn't clip outside the screen.
+            val rotationScale = if (rotateAngle == RotateAngle.R90 || rotateAngle == RotateAngle.R270) {
+                (maxWidth / maxHeight)
+            } else 1f
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        useController = false
+                        layoutParams = FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT
+                        )
+                        this.player = player
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+                    }
+                },
+                update = { it.resizeMode = resizeMode; it.player = player },
+                onRelease = { it.player = null },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        rotationZ = rotateAngle.degrees
+                        scaleX = rotationScale
+                        scaleY = rotationScale
+                    }
+            )
+        }
 
         // ---- Gesture zones (only active when unlocked) ----
         if (!locked) {
@@ -339,27 +406,10 @@ fun FullScreenPlayerScreen(
         ) {
             TopBar(
                 onBack = onExitFullscreen,
-                onLock = { locked = true },
-                onFit = {
-                    fitMode = when (fitMode) {
-                        ScreenFitMode.FIT -> ScreenFitMode.FILL
-                        ScreenFitMode.FILL -> ScreenFitMode.ZOOM
-                        ScreenFitMode.ZOOM -> ScreenFitMode.FIT
-                    }
-                },
-                fitMode = fitMode,
-                onRotate = {
-                    activity?.let { act ->
-                        orientationLocked = !orientationLocked
-                        act.requestedOrientation = if (orientationLocked) {
-                            if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                            else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        } else {
-                            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                        }
-                    }
-                },
-                onAdjust = { adjustSheetOpen = true; poke() }
+                fileName = fileName,
+                syncStatus = syncStatus,
+                onPip = { enterPip() },
+                onMore = { moreSheetOpen = true; poke() }
             )
         }
 
@@ -382,13 +432,27 @@ fun FullScreenPlayerScreen(
                     enabled = canControl
                 ) { seekRelative(-10_000); poke() }
 
+                val playInteractionSource = remember { MutableInteractionSource() }
+                val playPressed by playInteractionSource.collectIsPressedAsState()
+                val playScale by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (playPressed) 0.9f else 1f,
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                        stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                    ),
+                    label = "playButtonScale"
+                )
                 Box(
                     modifier = Modifier
+                        .scale(playScale)
                         .size(84.dp)
                         .clip(CircleShape)
                         .background(Color.White)
                         .then(
-                            if (canControl) Modifier.tapModifier {
+                            if (canControl) Modifier.clickable(
+                                interactionSource = playInteractionSource,
+                                indication = null
+                            ) {
                                 viewModel.onPlayPause(); poke()
                             } else Modifier
                         ),
@@ -431,6 +495,11 @@ fun FullScreenPlayerScreen(
                 onSpeedClick = { speedSheetOpen = true; poke() },
                 onSubtitleClick = { trackSheet = TrackSheetType.SUBTITLE; poke() },
                 onAudioTrackClick = { trackSheet = TrackSheetType.AUDIO; poke() },
+                fitMode = fitMode,
+                onFitClick = { screenFitSheetOpen = true; poke() },
+                rotateLabel = rotateAngle.label,
+                onRotateClick = { rotateSheetOpen = true; poke() },
+                onLockClick = { locked = true },
                 isLandscape = isLandscape
             )
         }
@@ -472,6 +541,30 @@ fun FullScreenPlayerScreen(
             brightness = brightnessLevel,
             onBrightnessChange = { applyBrightness(it) },
             onDismiss = { adjustSheetOpen = false }
+        )
+    }
+
+    if (moreSheetOpen) {
+        MoreMenuSheet(
+            onLockControls = { moreSheetOpen = false; locked = true },
+            onPictureAdjustments = { moreSheetOpen = false; adjustSheetOpen = true },
+            onDismiss = { moreSheetOpen = false }
+        )
+    }
+
+    if (screenFitSheetOpen) {
+        ScreenFitSheet(
+            current = fitMode,
+            onSelect = { fitMode = it; screenFitSheetOpen = false },
+            onDismiss = { screenFitSheetOpen = false }
+        )
+    }
+
+    if (rotateSheetOpen) {
+        RotateSheet(
+            current = rotateAngle,
+            onSelect = { rotateAngle = it; rotateSheetOpen = false },
+            onDismiss = { rotateSheetOpen = false }
         )
     }
 }
@@ -544,12 +637,30 @@ private fun GlassIconButton(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pressed) 0.88f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+        ),
+        label = "glassButtonScale"
+    )
     Box(
         modifier = Modifier
+            .scale(scale)
             .size(size)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = if (enabled) 0.38f else 0.2f))
-            .then(if (enabled) Modifier.tapModifier(onClick) else Modifier),
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), CircleShape)
+            .then(
+                if (enabled) Modifier.clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                ) else Modifier
+            ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -564,11 +675,10 @@ private fun GlassIconButton(
 @Composable
 private fun TopBar(
     onBack: () -> Unit,
-    onLock: () -> Unit,
-    onFit: () -> Unit,
-    fitMode: ScreenFitMode,
-    onRotate: () -> Unit,
-    onAdjust: () -> Unit
+    fileName: String,
+    syncStatus: SyncStatus?,
+    onPip: () -> Unit,
+    onMore: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -580,11 +690,61 @@ private fun TopBar(
     ) {
         GlassIconButton(icon = Icons.Filled.ArrowBack, contentDescription = "Exit full screen", onClick = onBack)
 
+        if (fileName.isNotBlank() || syncStatus != null) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
+                    .clip(ExtraShapes.pill)
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), ExtraShapes.pill)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (syncStatus != null) {
+                    val dotColor = when (syncStatus.level) {
+                        SyncLevel.PERFECT -> ZurutialTheme.extendedColors.syncGreen
+                        SyncLevel.HOST_DISCONNECTED -> ZurutialTheme.extendedColors.syncRed
+                        else -> ZurutialTheme.extendedColors.syncOrange
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(dotColor)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Column {
+                    if (fileName.isNotBlank()) {
+                        Text(
+                            fileName,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (syncStatus != null) {
+                        Text(
+                            syncStatus.label,
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GlassIconButton(icon = Icons.Filled.Lock, contentDescription = "Lock controls", onClick = onLock)
-            GlassIconButton(icon = Icons.Filled.AspectRatio, contentDescription = "Screen fit: ${fitMode.label}", onClick = onFit)
-            GlassIconButton(icon = Icons.Filled.ScreenRotation, contentDescription = "Rotate", onClick = onRotate)
-            GlassIconButton(icon = Icons.Filled.Tune, contentDescription = "Picture adjustments", onClick = onAdjust)
+            GlassIconButton(icon = Icons.Filled.PictureInPictureAlt, contentDescription = "Picture-in-picture", onClick = onPip)
+            GlassIconButton(icon = Icons.Filled.MoreVert, contentDescription = "More options", onClick = onMore)
         }
     }
 }
@@ -602,6 +762,11 @@ private fun BottomBar(
     onSpeedClick: () -> Unit,
     onSubtitleClick: () -> Unit,
     onAudioTrackClick: () -> Unit,
+    fitMode: ScreenFitMode,
+    onFitClick: () -> Unit,
+    rotateLabel: String,
+    onRotateClick: () -> Unit,
+    onLockClick: () -> Unit,
     isLandscape: Boolean
 ) {
     Column(
@@ -636,18 +801,27 @@ private fun BottomBar(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(formatTime(positionMs.toLong()), color = Color.White, style = MaterialTheme.typography.labelMedium)
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(if (isLandscape) 18.dp else 10.dp)) {
-                        GlassTextButton(text = "${formatSpeed(playbackSpeed)}x", icon = Icons.Filled.Speed, onClick = onSpeedClick)
-                        GlassIconButton(icon = Icons.Filled.ClosedCaption, contentDescription = "Subtitles", size = 38.dp, iconSize = 20.dp, onClick = onSubtitleClick)
-                        GlassIconButton(icon = Icons.Filled.Audiotrack, contentDescription = "Audio track", size = 38.dp, iconSize = 20.dp, onClick = onAudioTrackClick)
-                    }
-
                     Text(
                         "-${formatTime((durationMs - positionMs).toLong().coerceAtLeast(0))}",
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium
                     )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(if (isLandscape) 14.dp else 10.dp)
+                ) {
+                    GlassTextButton(text = "${formatSpeed(playbackSpeed)}x", icon = Icons.Filled.Speed, onClick = onSpeedClick)
+                    GlassTextButton(text = fitMode.label, icon = Icons.Filled.AspectRatio, onClick = onFitClick)
+                    GlassTextButton(text = rotateLabel, icon = Icons.Filled.ScreenRotation, onClick = onRotateClick)
+                    GlassIconButton(icon = Icons.Filled.ClosedCaption, contentDescription = "Subtitles", size = 38.dp, iconSize = 20.dp, onClick = onSubtitleClick)
+                    GlassIconButton(icon = Icons.Filled.Audiotrack, contentDescription = "Audio track", size = 38.dp, iconSize = 20.dp, onClick = onAudioTrackClick)
+                    GlassIconButton(icon = Icons.Filled.Lock, contentDescription = "Lock controls", size = 38.dp, iconSize = 20.dp, onClick = onLockClick)
                 }
             }
         }
@@ -879,7 +1053,85 @@ private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit) {
     ) {
         Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         if (selected) {
-            Icon(Icons.Filled.ClosedCaption, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MoreMenuSheet(
+    onLockControls: () -> Unit,
+    onPictureAdjustments: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = ExtraShapes.bottomSheet) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).padding(bottom = 24.dp)) {
+            Text("More", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+            MenuRow(icon = Icons.Filled.Lock, label = "Lock controls", onClick = onLockControls)
+            MenuRow(icon = Icons.Filled.Tune, label = "Picture adjustments", onClick = onPictureAdjustments)
+        }
+    }
+}
+
+@Composable
+private fun MenuRow(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .tapModifier(onClick)
+            .padding(vertical = 14.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScreenFitSheet(
+    current: ScreenFitMode,
+    onSelect: (ScreenFitMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = ExtraShapes.bottomSheet) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).padding(bottom = 24.dp)) {
+            Text("Screen fit", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+            ScreenFitMode.entries.forEach { mode ->
+                TrackRow(label = mode.label, selected = mode == current) { onSelect(mode) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RotateSheet(
+    current: RotateAngle,
+    onSelect: (RotateAngle) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, shape = ExtraShapes.bottomSheet) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).padding(bottom = 24.dp)) {
+            Text("Rotate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Rotates the video frame only — for footage recorded sideways. This doesn't change playback for other room members.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            RotateAngle.entries.forEach { angle ->
+                TrackRow(label = angle.label, selected = angle == current) { onSelect(angle) }
+            }
         }
     }
 }

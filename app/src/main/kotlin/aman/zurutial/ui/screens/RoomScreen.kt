@@ -94,12 +94,14 @@ import kotlinx.coroutines.delay
 @Composable
 fun RoomScreen(
     viewModel: RoomViewModel,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    isInPip: Boolean = false
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val canControl by viewModel.canControlPlayback.collectAsState()
     val members by viewModel.members.collectAsState()
     val logs by viewModel.logs.collectAsState()
+    val audioIssue by viewModel.audioIssue.collectAsState()
     val serverPing by viewModel.serverPing.collectAsState()
     val e2ePing by viewModel.e2ePing.collectAsState()
     val player = viewModel.player
@@ -550,6 +552,27 @@ fun RoomScreen(
                     .padding(bottom = 16.dp)
             )
         }
+
+        // While the system has shrunk us into native Picture-in-Picture, cover
+        // everything else with just the bare video surface — no controls, no chrome,
+        // matching what Android's PiP API expects (no custom floating player).
+        if (isInPip) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        androidx.media3.ui.PlayerView(ctx).apply {
+                            useController = false
+                            layoutParams = FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            )
+                        }
+                    },
+                    update = { it.player = player },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
     }
 
     if (debugSheetOpen) {
@@ -560,9 +583,23 @@ fun RoomScreen(
         )
     }
 
+    if (audioIssue != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.dismissAudioIssue() },
+            icon = { Icon(Icons.Filled.VolumeOff, contentDescription = null) },
+            title = { Text("Audio format issue") },
+            text = { Text(audioIssue ?: "") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissAudioIssue() }) { Text("Got it") }
+            }
+        )
+    }
+
     if (fullscreenOpen) {
         FullScreenPlayerScreen(
             viewModel = viewModel,
+            fileName = room?.fileName ?: "",
+            syncStatus = syncStatus,
             onExitFullscreen = { fullscreenOpen = false }
         )
     }

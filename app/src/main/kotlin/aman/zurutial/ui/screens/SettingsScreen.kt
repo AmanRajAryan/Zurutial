@@ -1,5 +1,6 @@
 package aman.zurutial.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
@@ -28,6 +30,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -61,7 +64,9 @@ fun SettingsScreen(
     var autoSync by remember { mutableStateOf(SettingsManager.getAutoSyncEnabled(context)) }
     var seekSensitivity by remember { mutableStateOf(SettingsManager.getSeekSensitivity(context)) }
     var debugLogsEnabled by remember { mutableStateOf(SettingsManager.getDebugLogsEnabled(context)) }
+    var pipMode by remember { mutableStateOf(SettingsManager.getPipMode(context)) }
     var showNameDialog by remember { mutableStateOf(false) }
+    var showPipDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -159,6 +164,20 @@ fun SettingsScreen(
             }
         }
 
+        item { SectionHeader("Picture-in-Picture") }
+        item {
+            SettingsRow(
+                icon = Icons.Filled.PictureInPicture,
+                title = "Auto Picture-in-Picture",
+                subtitle = when (pipMode) {
+                    "always" -> "Always, whenever you leave the app"
+                    "never" -> "Never"
+                    else -> "Only while a video is playing"
+                },
+                onClick = { showPipDialog = true }
+            )
+        }
+
         item { SectionHeader("Network") }
         item {
             SettingsRow(
@@ -226,6 +245,52 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showNameDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showPipDialog) {
+        data class PipOption(val value: String, val label: String, val subtitle: String)
+        val options = listOf(
+            PipOption("always", "Always", "Enter PiP any time you leave the app during a room session"),
+            PipOption("playing", "Only while playing", "Enter PiP only if a video is actively playing"),
+            PipOption("never", "Never", "Don't use Picture-in-Picture")
+        )
+        AlertDialog(
+            onDismissRequest = { showPipDialog = false },
+            title = { Text("Picture-in-Picture") },
+            text = {
+                Column {
+                    options.forEach { option ->
+                        val value = option.value
+                        val label = option.label
+                        val subtitle = option.subtitle
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pipMode = value
+                                    SettingsManager.setPipMode(context, value)
+                                    showPipDialog = false
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = pipMode == value, onClick = {
+                                pipMode = value
+                                SettingsManager.setPipMode(context, value)
+                                showPipDialog = false
+                            })
+                            Column {
+                                Text(label, style = MaterialTheme.typography.titleSmall)
+                                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPipDialog = false }) { Text("Close") }
             }
         )
     }
