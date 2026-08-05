@@ -347,13 +347,13 @@ fun FullScreenPlayerScreen(
             Row(modifier = Modifier.fillMaxSize()) {
                 GestureZone(
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    onSingleTap = { poke(); if (controlsVisible) controlsVisible = false },
+                    onSingleTap = { controlsVisible = !controlsVisible },
                     onDoubleTap = { seekRelative(-10_000); indicatorType = GestureIndicator.Seek(false) },
                     onVerticalDrag = { delta -> applyBrightness(brightnessLevel - delta) }
                 )
                 GestureZone(
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    onSingleTap = { poke(); if (controlsVisible) controlsVisible = false },
+                    onSingleTap = { controlsVisible = !controlsVisible },
                     onDoubleTap = { seekRelative(10_000); indicatorType = GestureIndicator.Seek(true) },
                     onVerticalDrag = { delta -> applyVolume(volumeLevel - delta) }
                 )
@@ -604,10 +604,14 @@ private fun GestureZone(
     onDoubleTap: () -> Unit,
     onVerticalDrag: (deltaFraction: Float) -> Unit
 ) {
+    val currentOnSingleTap by androidx.compose.runtime.rememberUpdatedState(onSingleTap)
+    val currentOnDoubleTap by androidx.compose.runtime.rememberUpdatedState(onDoubleTap)
+    val currentOnVerticalDrag by androidx.compose.runtime.rememberUpdatedState(onVerticalDrag)
+
     Box(
         modifier = modifier
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { onSingleTap() }, onDoubleTap = { onDoubleTap() })
+                detectTapGestures(onTap = { currentOnSingleTap() }, onDoubleTap = { currentOnDoubleTap() })
             }
             .pointerInput(Unit) {
                 var heightPx = size.height.toFloat().coerceAtLeast(1f)
@@ -615,7 +619,7 @@ private fun GestureZone(
                     onDragStart = { heightPx = size.height.toFloat().coerceAtLeast(1f) },
                     onVerticalDrag = { change, dragAmount ->
                         change.consume()
-                        onVerticalDrag(dragAmount / heightPx)
+                        currentOnVerticalDrag(dragAmount / heightPx)
                     }
                 )
             }
