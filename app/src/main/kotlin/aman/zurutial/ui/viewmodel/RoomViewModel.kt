@@ -463,7 +463,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                         playbackController?.sendAction(
                             positionMs = exoPlayer.currentPosition,
                             isPlaying = true,
-                            playbackSpeed = exoPlayer.playbackParameters.speed,
+                            playbackSpeed = _targetPlaybackSpeed.value,
                             actionType = "sync",
                             actionId = actionId
                         )
@@ -509,7 +509,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         playbackController?.sendAction(
             positionMs = exoPlayer.currentPosition,
             isPlaying = newPlaying,
-            playbackSpeed = exoPlayer.playbackParameters.speed,
+            playbackSpeed = _targetPlaybackSpeed.value,
             actionType = if (newPlaying) "play" else "pause",
             actionId = actionId
         )
@@ -524,7 +524,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
         playbackController?.sendAction(
             positionMs = positionMs,
             isPlaying = exoPlayer.playWhenReady, // Use intent
-            playbackSpeed = exoPlayer.playbackParameters.speed,
+            playbackSpeed = _targetPlaybackSpeed.value,
             actionType = "seek",
             actionId = actionId
         )
@@ -619,7 +619,7 @@ class RoomViewModel(application: Application) : AndroidViewModel(application) {
                         playbackController?.sendAction(
                             positionMs = exoPlayer.currentPosition,
                             isPlaying = false,
-                            playbackSpeed = exoPlayer.playbackParameters.speed,
+                            playbackSpeed = _targetPlaybackSpeed.value,
                             actionType = "auto-pause",
                             actionId = java.util.UUID.randomUUID().toString()
                         )
